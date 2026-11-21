@@ -75,6 +75,27 @@
   border-radius: 16px;
   background: #edf0f8;
 }
+.map-preview-frame {
+  width: 100%;
+  height: 220px;
+  display: block;
+  border: 0;
+}
+.map-preview-error {
+  padding: 10px 12px;
+  color: #6f7283;
+  font-size: 11px;
+  line-height: 1.45;
+  background: #faf9ff;
+}
+.map-preview > a {
+  display: block;
+  padding: 8px 12px;
+  color: #4d438f;
+  font-size: 11px;
+  text-decoration: underline;
+  background: #fff;
+}
 .map-preview-empty {
   display: grid;
   min-height: 92px;
@@ -111,6 +132,13 @@
   max-height: 190px;
   object-fit: cover;
   border-radius: 10px;
+}
+.street-view-inline-frame {
+  width: 100%;
+  height: 190px;
+  border: 0;
+  border-radius: 10px;
+  background: #f1ece5;
 }
 .nav-item svg,
 .icon-button svg,

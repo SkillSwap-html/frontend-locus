@@ -1127,7 +1127,13 @@ function AssistantView({
       texto: pergunta,
       criadaEm: new Date().toISOString(),
     };
-    setMensagens((atuais) => [...atuais, user]);
+    const idResposta = `a-${Date.now()}`;
+    setMensagens((atuais) => [...atuais, user, {
+      id: idResposta,
+      autor: "assistente",
+      texto: "Estou consultando o destino e os locais reais para você...",
+      criadaEm: new Date().toISOString(),
+    }]);
     setEnviando(true);
     try {
       const resposta = await perguntarGemini([...mensagens, user], pergunta, {
@@ -1145,6 +1151,9 @@ function AssistantView({
         ...(hospedagemBase ? { hospedagemBase: `${hospedagemBase.nome} (${hospedagemBase.lat}, ${hospedagemBase.lng})` } : {}),
         roteiro: viagem?.roteiro.map((item) => `dia ${item.dia}: ${item.titulo}`).join(" | "),
       });
+      // Mostra a resposta textual imediatamente. Places e rotas enriquecem a
+      // mensagem, mas não podem bloquear a conversa enquanto são consultados.
+      setMensagens((atuais) => atuais.map((item) => item.id === idResposta ? { ...resposta, id: idResposta } : item));
       const destinoBusca = viagem?.destino || preferencias?.destino || "";
       const consultasDaIa = (resposta.consultas ?? [])
         .map((consulta) => consulta.trim())
@@ -1232,16 +1241,16 @@ function AssistantView({
         };
         delete respostaFinal.recomendacoes;
       }
-      setMensagens((atuais) => [...atuais, respostaFinal]);
+      setMensagens((atuais) => atuais.map((item) => item.id === idResposta ? { ...respostaFinal, id: idResposta } : item));
     } catch (error) {
       const mensagemErro = normalizarErro(error).message;
       onToast(mensagemErro);
-      setMensagens((atuais) => [...atuais, {
-        id: `erro-${Date.now()}`,
+      setMensagens((atuais) => atuais.map((item) => item.id === idResposta ? {
+        id: idResposta,
         autor: "assistente",
         texto: `${mensagemErro} Tente novamente ou informe um ponto turístico específico.`,
         criadaEm: new Date().toISOString(),
-      }]);
+      } : item));
     } finally {
       setEnviando(false);
     }
@@ -1537,9 +1546,11 @@ function AssistantView({
                             : "Sem imagem disponível para este ponto"}
                         </small>
                       </div>
-                      {streetView.imagemUrl && (
+                      {streetView.embedUrl ? (
+                        <iframe className="street-view-inline-frame" src={streetView.embedUrl} title={`Street View de ${lugar.nome}`} loading="lazy" allowFullScreen />
+                      ) : streetView.imagemUrl ? (
                         <img src={streetView.imagemUrl} alt={`Street View de ${lugar.nome}`} />
-                      )}
+                      ) : null}
                       {streetView.mapaUrl && <a href={streetView.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Street View</a>}
                     </div>
                   );
@@ -1573,7 +1584,7 @@ function AssistantView({
             <button className="offer-modal-close" type="button" onClick={() => setStreetViewSelecionado(null)} aria-label="Fechar"><X size={17} /></button>
             <span className="section-label">Antes de adicionar</span>
             <h3>{streetViewSelecionado.lugar.nome}</h3>
-            {streetViewSelecionado.meta.imagemUrl ? <img className="street-view-modal-image" src={streetViewSelecionado.meta.imagemUrl} alt={`Street View de ${streetViewSelecionado.lugar.nome}`} /> : <iframe className="street-view-frame" src={streetViewSelecionado.meta.mapaUrl} title={`Street View de ${streetViewSelecionado.lugar.nome}`} loading="lazy" />}
+            {streetViewSelecionado.meta.embedUrl ? <iframe className="street-view-frame" src={streetViewSelecionado.meta.embedUrl} title={`Street View de ${streetViewSelecionado.lugar.nome}`} loading="lazy" allowFullScreen /> : streetViewSelecionado.meta.imagemUrl ? <img className="street-view-modal-image" src={streetViewSelecionado.meta.imagemUrl} alt={`Street View de ${streetViewSelecionado.lugar.nome}`} /> : <iframe className="street-view-frame" src={streetViewSelecionado.meta.mapaUrl} title={`Street View de ${streetViewSelecionado.lugar.nome}`} loading="lazy" allowFullScreen />}
             <p>{streetViewSelecionado.lugar.endereco || "Local consultado no mapa"}</p>
             <div className="street-view-details">
               <span>{streetViewSelecionado.lugar.categoria}</span>

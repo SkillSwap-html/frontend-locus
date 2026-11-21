@@ -325,6 +325,7 @@ export async function calcularRota(
 export interface StreetViewMeta {
   status: string;
   imagemUrl?: string;
+  embedUrl?: string;
   mapaUrl?: string;
   data?: string;
 }
@@ -338,6 +339,11 @@ export async function streetViewMetadata(lat: number, lng: number): Promise<Stre
   const key = import.meta.env["VITE_GOOGLE_MAPS_API_KEY"] as string | undefined;
   return {
     ...resultado,
+    ...(key
+      ? {
+          embedUrl: `https://www.google.com/maps/embed/v1/streetview?key=${encodeURIComponent(key)}&location=${encodeURIComponent(`${lat},${lng}`)}&heading=0&pitch=0&fov=90`,
+        }
+      : {}),
     ...(key && resultado.status === "OK"
       ? {
           imagemUrl: `https://maps.googleapis.com/maps/api/streetview?size=640x360&location=${lat},${lng}&key=${encodeURIComponent(key)}`,
