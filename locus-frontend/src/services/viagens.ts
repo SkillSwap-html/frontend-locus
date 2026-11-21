@@ -106,6 +106,8 @@ async function hidratar(raw: Record<string, unknown>): Promise<Viagem> {
     ).catch(() => []),
   ]);
 
+  dias.sort((a, b) => String(a["data"] ?? "").localeCompare(String(b["data"] ?? "")));
+
   const itensPorDia = await Promise.all(
     dias.map((dia) =>
       chamar<Array<Record<string, unknown>>>(() =>

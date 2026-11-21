@@ -32,11 +32,14 @@ export async function lerPreferenciasBackend(): Promise<Preferencias> {
   const usuarioId = backendUserId();
   const perfil = await chamar<Json>(() => api.get(`/api/perfis/usuario/${usuarioId}`, { params: { usuarioSolicitanteId: usuarioId } }));
   const perfilId = Number(perfil["id"]);
-  const [viagem, transportePreferido, veiculo] = await Promise.all([
+  const [viagem, transportePreferido] = await Promise.all([
     chamar<Json>(() => api.get(`/api/preferencias-viagem/perfil/${perfilId}`, { params: { usuarioSolicitanteId: usuarioId } })).catch((): Json => ({})),
     chamar<Json>(() => api.get(`/api/preferencias-transporte/perfil/${perfilId}`, { params: { usuarioSolicitanteId: usuarioId } })).catch((): Json => ({})),
-    chamar<Json>(() => api.get(`/api/perfis-veiculo/perfil/${perfilId}`, { params: { usuarioSolicitanteId: usuarioId } })).catch((): Json => ({})),
   ]);
+  const modoTransporte = transportePreferido["modoTransporte"];
+  const veiculo = ["CARRO", "MOTOCICLETA", "VEICULO_PARTICULAR"].includes(String(modoTransporte ?? "").toUpperCase())
+    ? await chamar<Json>(() => api.get(`/api/perfis-veiculo/perfil/${perfilId}`, { params: { usuarioSolicitanteId: usuarioId } })).catch((): Json => ({}))
+    : {};
   const idade = Number(perfil["idade"]);
   return {
     ...vazio,
@@ -49,7 +52,7 @@ export async function lerPreferenciasBackend(): Promise<Preferencias> {
     destino: texto(viagem["destinoPreferido"]),
     modoOrcamento: modoOrcamento(viagem["tipoOrcamento"]),
     limites: { ...vazio.limites, extras: Number(viagem["valorOrcamento"]) || 0 },
-    transporte: transporte(transportePreferido["modoTransporte"]),
+    transporte: transporte(modoTransporte),
     prioridadeTransporte: (texto(transportePreferido["prioridade"]) as PrioridadeTransporte) || "INDIFERENTE",
     ...(veiculo["id"] ? {
       veiculo: {

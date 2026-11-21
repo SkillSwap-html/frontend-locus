@@ -1,6 +1,8 @@
 type GoogleMapsNamespace = {
   maps: {
-    Map: new (element: HTMLElement, options: Record<string, unknown>) => unknown;
+    Map: new (element: HTMLElement, options: Record<string, unknown>) => {
+      fitBounds(bounds: { extend(point: { lat: number; lng: number }): void }): void;
+    };
     Marker: new (options: Record<string, unknown>) => unknown;
     LatLngBounds: new () => { extend(point: { lat: number; lng: number }): void };
     StreetViewPanorama: new (element: HTMLElement, options: Record<string, unknown>) => {

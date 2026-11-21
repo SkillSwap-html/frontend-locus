@@ -1448,7 +1448,7 @@ function AssistantView({
     ) as Partial<Record<CategoriaOrcamento, number>>;
   }
   function perguntaPedeOrcamento(pergunta: string): boolean {
-    return /orçamento|orcamento|quanto.*gasto|quanto.*levar|valor.*viagem|gastos?|custos?|preço total|preco total|limite por categoria/.test(pergunta.toLowerCase());
+    return /orçamento|orcamento|quanto.*gasto|quanto.*levar|valor.*viagem|gastos?|custos?|preço total|preco total|limite por categoria|definir valores|categorias?.*(visitas|alimentação|transporte|extras)/.test(pergunta.toLowerCase());
   }
   function limitarSugestaoOrcamento(sugestao: Partial<Record<CategoriaOrcamento, number>>): Partial<Record<CategoriaOrcamento, number>> {
     const valores = Object.entries(sugestao).filter(([, valor]) => Number.isFinite(Number(valor)) && Number(valor) > 0) as [CategoriaOrcamento, number][];
@@ -1536,6 +1536,7 @@ function AssistantView({
         ),
       );
       const encontrados = resultados.flatMap((item) => item.lugares);
+      const placesEmFallback = resultados.some((item) => item.fallback);
       let respostaFinal = respostaComOrcamento;
       if (encontrados.length) {
         const unicos = [...new globalThis.Map(encontrados.map((item) => [item.placeId, item])).values()];
@@ -1585,7 +1586,7 @@ function AssistantView({
           };
         });
         respostaFinal = {
-          ...resposta,
+          ...respostaComOrcamento,
           texto: organizados.length
             ? `${resposta.texto} Encontrei ${organizados.length} locais reais${hospedagemBase ? ` em até 20 km da hospedagem ${hospedagemBase.nome}` : ""}. Veja a avaliação, abra o Street View e adicione somente os que desejar.`
             : `Não encontrei pontos turísticos dentro de 20 km da hospedagem ${hospedagemBase?.nome ?? "selecionada"}. Vou evitar sugerir locais distantes; pesquise um bairro ou local específico no campo ao lado.`,
@@ -1595,10 +1596,10 @@ function AssistantView({
         setLugares([]);
         setRota([]);
         respostaFinal = {
-          ...resposta,
-          texto: falhasBusca
-            ? `${resposta.texto} Não consegui consultar o Google Places agora. Tente novamente em alguns segundos ou use a busca ao lado.`
-            : `${resposta.texto} Não encontrei resultados reais para essa busca no destino informado. Tente citar uma praia, museu, bairro ou ponto turístico específico.`,
+          ...respostaComOrcamento,
+          texto: falhasBusca || placesEmFallback
+            ? `${respostaComOrcamento.texto} A consulta de lugares está temporariamente indisponível; o planejamento e o orçamento continuam disponíveis. Tente novamente em alguns segundos ou use a busca ao lado.`
+            : `${respostaComOrcamento.texto} Não encontrei resultados reais para essa busca no destino informado. Tente citar uma praia, museu, bairro ou ponto turístico específico.`,
         };
         delete respostaFinal.recomendacoes;
       }
@@ -2298,8 +2299,8 @@ function BudgetView({
               <span className="budget-dot" />
               <strong>{rotuloCategoria(item.categoria)}</strong>
             </div>
-            <b>{brl(item.subtotal)}</b>
-            <small>{item.limite ? `Limite ${brl(item.limite)}` : "Sem limite definido"}</small>
+            <b>{brl(item.subtotal > 0 ? item.subtotal : item.limite > 0 ? item.limite : 0)}</b>
+            <small>{item.limite ? `${item.subtotal > 0 ? "Limite" : "Meta sugerida"} ${brl(item.limite)}` : "Sem limite definido"}</small>
           </div>
         ))}
       </div>

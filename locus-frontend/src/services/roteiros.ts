@@ -41,23 +41,7 @@ export async function compararVersoes(versaoAntigaId: string, versaoNovaId: stri
 }
 
 export async function criarRoteiroInicial(viagem: Viagem): Promise<Viagem> {
-  const inicio = new Date(`${viagem.dataInicio}T12:00:00`);
-  const fim = new Date(`${viagem.dataFim || viagem.dataInicio}T12:00:00`);
-  const datas: string[] = [];
-  for (let data = new Date(inicio); data <= fim && datas.length < 90; data.setDate(data.getDate() + 1)) {
-    datas.push(data.toISOString().slice(0, 10));
-  }
-  await Promise.all(
-    (datas.length ? datas : [viagem.dataInicio]).map((data) =>
-      chamar<{ id: number }>(() =>
-        api.post(
-          `/api/dias-roteiro/viagem/${viagem.id}`,
-          { data },
-          { params: { usuarioId: backendUserId() } },
-        ),
-      ),
-    ),
-  );
+  await garantirDiasRoteiro(viagem);
   return {
     ...viagem,
     roteiro: [],
@@ -73,10 +57,16 @@ export async function adicionarRecomendacao(
   const possuiValor = Number.isFinite(valor) && valor > 0;
   const ehOferta = recomendacao.tipo === "voo" || recomendacao.tipo === "hospedagem";
   if (!ehOferta) {
-    const dias = await chamar<Array<{ id: number }>>(() =>
+    const viagem = await obterViagem(viagemId);
+    await garantirDiasRoteiro(viagem);
+    const dias = await chamar<Array<{ id: number; data?: string }>>(() =>
       api.get(`/api/dias-roteiro/viagem/${viagemId}`, { params: { usuarioId } }),
     );
-    const dia = dias[Math.max(0, Math.min(dias.length - 1, (recomendacao.dia ?? 1) - 1))] ?? (await criarDia(viagemId));
+    const datas = datasDaViagem(viagem);
+    const indiceDia = Math.max(0, Math.min(datas.length - 1, (recomendacao.dia ?? 1) - 1));
+    const dia = dias.find((item) => item.data === datas[indiceDia])
+      ?? dias.sort((a, b) => String(a.data ?? "").localeCompare(String(b.data ?? "")))[indiceDia]
+      ?? (await criarDia(viagemId, datas[indiceDia] ?? viagem.dataInicio));
     const itens = await chamar<Array<{ horarioInicio?: string; duracaoMinutos?: number }>>(() =>
       api.get(`/api/itens-roteiro/dia/${dia.id}`, { params: { usuarioId } }),
     );
@@ -178,14 +168,42 @@ export async function criarLinkCompartilhamento(viagemId: string): Promise<strin
   return resposta.token;
 }
 
-async function criarDia(viagemId: string): Promise<{ id: number }> {
-  const viagem = await obterViagem(viagemId);
+async function criarDia(viagemId: string, data?: string): Promise<{ id: number }> {
   return chamar<{ id: number }>(() =>
     api.post(
       `/api/dias-roteiro/viagem/${viagemId}`,
-      { data: viagem.dataInicio },
+      { data },
       { params: { usuarioId: backendUserId() } },
     ),
+  );
+}
+
+function datasDaViagem(viagem: Viagem): string[] {
+  const inicio = new Date(`${viagem.dataInicio}T12:00:00`);
+  const fim = new Date(`${viagem.dataFim || viagem.dataInicio}T12:00:00`);
+  const datas: string[] = [];
+  for (let data = new Date(inicio); data <= fim && datas.length < 90; data.setDate(data.getDate() + 1)) {
+    datas.push(data.toISOString().slice(0, 10));
+  }
+  return datas.length ? datas : [viagem.dataInicio];
+}
+
+async function garantirDiasRoteiro(viagem: Viagem): Promise<void> {
+  const usuarioId = backendUserId();
+  const existentes = await chamar<Array<{ id: number; data?: string }>>(() =>
+    api.get(`/api/dias-roteiro/viagem/${viagem.id}`, { params: { usuarioId } }),
+  );
+  const existentesPorData = new Set(existentes.map((dia) => dia.data).filter(Boolean));
+  await Promise.all(
+    datasDaViagem(viagem)
+      .filter((data) => !existentesPorData.has(data))
+      .map((data) => chamar<{ id: number }>(() =>
+        api.post(
+          `/api/dias-roteiro/viagem/${viagem.id}`,
+          { data },
+          { params: { usuarioId } },
+        ),
+      )),
   );
 }
 

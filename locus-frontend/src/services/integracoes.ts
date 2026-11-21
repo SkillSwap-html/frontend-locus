@@ -1,5 +1,5 @@
 import type { CategoriaOrcamento, Lugar, MensagemAssistente, OfertaHotel, OfertaVoo } from "@/types";
-import { api, chamar } from "./api";
+import { api, chamar, LocusError } from "./api";
 import { uid } from "./ids";
 
 /** O navegador chama apenas o backend; as chaves dos provedores nunca ficam aqui. */
@@ -204,7 +204,7 @@ export function respostaLocalAssistente(textoPergunta: string, contexto?: Contex
     ? "Orçamento aberto: vou somar cada escolha."
     : `Saldo disponível aproximado: R$ ${Math.max(0, contexto.limite - (contexto.acumulado ?? 0)).toFixed(2)}.`;
   const valores = contexto?.orcamentoDetalhado ? ` ${contexto.orcamentoDetalhado}` : "";
-  const querOrcamento = /orçamento|orcamento|quanto.*gasto|quanto.*levar|valor.*viagem|gastos?|custos?|preço total|preco total/.test(pergunta);
+  const querOrcamento = /orçamento|orcamento|quanto.*gasto|quanto.*levar|valor.*viagem|gastos?|custos?|preço total|preco total|definir valores|limites?|categorias?.*(visitas|alimentação|transporte|extras)/.test(pergunta);
   const orcamentoSugerido = querOrcamento && destino
     ? {
         passagem: contexto?.transporte === "onibus" ? 900 : contexto?.transporte === "carro" || contexto?.transporte === "moto" ? 650 : 2200,
@@ -294,21 +294,57 @@ export interface ResultadoBusca {
   fallback: boolean;
 }
 
+// O Places tem limite de taxa. Uma busca feita pelo chat, pela lateral e pelo
+// autocomplete não deve disparar três chamadas idênticas a cada renderização.
+// O cache curto também permite que o chat continue funcionando com fallback
+// local enquanto a cota do Google é recomposta.
+const CACHE_PLACES_MS = 45_000;
+const cacheBusca = new Map<string, { expiraEm: number; resultado: ResultadoBusca }>();
+const cacheAutocomplete = new Map<string, { expiraEm: number; resultado: { id: string; texto: string }[] }>();
+let placesIndisponivelAte = 0;
+
+function chaveBusca(valor: string): string {
+  return valor.trim().toLocaleLowerCase();
+}
+
+function placesFoiLimitado(error: unknown): boolean {
+  return error instanceof LocusError && error.tipo === "quota";
+}
+
 export async function buscaTextual(q: string): Promise<ResultadoBusca> {
-  const raw = await chamar<Json>(() =>
-    api.post(`${BASE}/google/places/busca-textual`, { textQuery: q, languageCode: "pt-BR" }),
-  );
-  const places = Array.isArray(raw.places) ? raw.places : [];
-  return { lugares: places.map(normalizarLugar), fallback: false };
+  const chave = chaveBusca(q);
+  const cacheado = cacheBusca.get(chave);
+  if (cacheado && cacheado.expiraEm > Date.now()) return cacheado.resultado;
+  if (placesIndisponivelAte > Date.now()) return { lugares: [], fallback: true };
+  try {
+    const raw = await chamar<Json>(() =>
+      api.post(`${BASE}/google/places/busca-textual`, { textQuery: q, languageCode: "pt-BR" }),
+    );
+    const places = Array.isArray(raw.places) ? raw.places : [];
+    const resultado = { lugares: places.map(normalizarLugar), fallback: false };
+    cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
+    return resultado;
+  } catch (error) {
+    if (placesFoiLimitado(error)) {
+      placesIndisponivelAte = Date.now() + CACHE_PLACES_MS;
+      return { lugares: [], fallback: true };
+    }
+    throw error;
+  }
 }
 
 export async function autocomplete(q: string): Promise<{ id: string; texto: string }[]> {
   if (q.length < 2) return [];
-  const raw = await chamar<Json>(() =>
-    api.post(`${BASE}/google/places/autocomplete`, { input: q }),
-  );
-  const suggestions = Array.isArray(raw.suggestions) ? raw.suggestions : [];
-  return suggestions
+  const chave = chaveBusca(q);
+  const cacheado = cacheAutocomplete.get(chave);
+  if (cacheado && cacheado.expiraEm > Date.now()) return cacheado.resultado;
+  if (placesIndisponivelAte > Date.now()) return [];
+  try {
+    const raw = await chamar<Json>(() =>
+      api.post(`${BASE}/google/places/autocomplete`, { input: q }),
+    );
+    const suggestions = Array.isArray(raw.suggestions) ? raw.suggestions : [];
+    const resultado = suggestions
     .map((item: Json) => {
       const prediction = objeto(objeto(item).placePrediction);
       const description = objeto(prediction.text);
@@ -318,6 +354,15 @@ export async function autocomplete(q: string): Promise<{ id: string; texto: stri
       };
     })
     .filter((item: { id: string; texto: string }) => item.id || item.texto);
+    cacheAutocomplete.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
+    return resultado;
+  } catch (error) {
+    if (placesFoiLimitado(error)) {
+      placesIndisponivelAte = Date.now() + CACHE_PLACES_MS;
+      return [];
+    }
+    throw error;
+  }
 }
 
 export async function detalhesLugar(placeId: string): Promise<Lugar> {

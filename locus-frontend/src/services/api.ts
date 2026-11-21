@@ -87,7 +87,7 @@ export function normalizarErro(e: unknown): LocusError {
   if (status === 401 || status === 403)
     return new LocusError("autenticacao", "Sua sessão expirou. Entre novamente.");
   if (status === 429)
-    return new LocusError("quota", "O limite de consultas foi atingido. Tente mais tarde.");
+    return new LocusError("quota", "A consulta automática está temporariamente indisponível. O planejamento local continua disponível.");
   if (status === 502 || status === 503)
     return new LocusError("provedor", mensagem ?? "O provedor externo não respondeu.");
   if (status === 504) return new LocusError("timeout", "O provedor demorou para responder.");
