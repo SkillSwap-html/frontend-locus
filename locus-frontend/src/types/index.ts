@@ -177,6 +177,7 @@ export interface OfertaHotel {
   imagemUrl?: string;
   latitude?: number;
   longitude?: number;
+  endereco?: string;
   fonte: string;
   consultadoEm: string;
   historico: Snapshot[];

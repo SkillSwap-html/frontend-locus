@@ -404,7 +404,7 @@ function normalizarVoo(raw: unknown, passageirosPadrao = 1): OfertaVoo {
 
 export async function buscarVoos(params: Record<string, string | number>): Promise<OfertaVoo[]> {
   const raw = await chamar<Json>(() => api.get(`${BASE}/ofertas/voos`, { params }));
-  const passageiros = Math.max(1, Number(params.adults ?? 1));
+  const passageiros = Math.max(1, Number(params["adults"] ?? 1));
   return (Array.isArray(raw.data) ? raw.data : []).map((item) => normalizarVoo(item, passageiros));
 }
 
@@ -428,57 +428,62 @@ export async function precificarVoo(oferta: OfertaVoo | Json): Promise<Json> {
 export async function buscarHoteis(
   params: Record<string, string | number>,
 ): Promise<OfertaHotel[]> {
-  const lista = await chamar<Json>(() =>
-    api.get(`${BASE}/ofertas/hoteis`, { params: { cityCode: params["cityCode"] } }),
-  );
-  const hotels = Array.isArray(lista.data) ? lista.data : [];
-  const ids =
-    texto(params["hotelIds"]) ||
-    hotels
-      .map((hotel: Json) => texto(objeto(hotel).hotelId))
-      .filter(Boolean)
-      .join(",");
-  if (!ids) return [];
+  const cidade = texto(params["cityName"]) || texto(params["cityCode"]);
+  const entrada = texto(params["checkInDate"]);
+  const saida = texto(params["checkOutDate"]);
+  const adultos = Math.max(1, numero(params["adults"], 1));
+  const quartos = Math.max(1, numero(params["roomQuantity"], 1));
+  const noites = entrada && saida
+    ? Math.max(1, Math.floor((new Date(`${saida}T12:00:00`).getTime() - new Date(`${entrada}T12:00:00`).getTime()) / 86400000))
+    : 0;
   const raw = await chamar<Json>(() =>
-    api.get(`${BASE}/ofertas/hoteis/ofertas`, { params: { ...params, hotelIds: ids } }),
+    api.post(`${BASE}/google/places/busca-textual`, {
+      textQuery: `hotéis e hospedagens reais em ${cidade}`,
+      languageCode: "pt-BR",
+    }),
   );
-  return (Array.isArray(raw.data) ? raw.data : []).map(normalizarHotel);
-}
-
-function normalizarHotel(raw: unknown): OfertaHotel {
-  const value = objeto(raw);
-  const hotel = objeto(value.hotel);
-  const offer = objeto(Array.isArray(value.offers) ? value.offers[0] : value);
-  const price = objeto(offer.price);
-  return {
-    id: texto(offer.id) || texto(hotel.hotelId),
-    hotel: texto(hotel.name) || "Hotel",
-    quarto: "Consultar oferta",
-    hospedes: Math.max(1, numero(offer.adults) || 1),
-    ...(numero(offer.roomQuantity) > 0 ? { quartos: numero(offer.roomQuantity) } : {}),
-    ...(numero(offer.nights) > 0 ? { noites: numero(offer.nights) } : {}),
-    checkin: texto(offer.checkInDate),
-    checkout: texto(offer.checkOutDate),
-    regime: "Consultar oferta",
-    politica: "Consultar oferta",
-    moeda: texto(price.currency) || "BRL",
-    taxas: 0,
-    preco: numero(price.total),
-    ...(texto(hotel.imageUrl)
-      ? { imagemUrl: texto(hotel.imageUrl) }
-      : value.simulated === true
-        ? {
-            imagemUrl: [
-              "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=900&q=80",
-              "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=900&q=80",
-              "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=900&q=80",
-            ][Math.abs(texto(hotel.hotelId).length) % 3] ?? "",
-          }
-        : {}),
-    latitude: numero(objeto(hotel.geoCode).latitude),
-    longitude: numero(objeto(hotel.geoCode).longitude),
-    fonte: value.simulated === true ? "Locus (simulado)" : "Provedor configurado",
-    consultadoEm: new Date().toISOString(),
-    historico: [],
-  };
+  const places = Array.isArray(raw.places) ? raw.places : [];
+  return Promise.all(places.slice(0, 8).map(async (place: Json, index: number) => {
+    const value = objeto(place);
+    const displayName = objeto(value.displayName);
+    const location = objeto(value.location);
+    const photos = Array.isArray(value.photos) ? value.photos : [];
+    const photoName = texto(objeto(photos[0]).name);
+    let imagemUrl: string | undefined;
+    if (photoName) {
+      try {
+        const imagem = await api.get<Blob>(`${BASE}/google/places/photo`, {
+          params: { name: photoName, maxWidthPx: 900 },
+          responseType: "blob",
+        });
+        imagemUrl = URL.createObjectURL(imagem.data);
+      } catch {
+        // A foto é opcional; o hotel real continua aparecendo com nome e endereço.
+      }
+    }
+    return {
+      id: texto(value.id) || `hotel-${index}`,
+      hotel: texto(displayName.text) || "Hospedagem encontrada no Google",
+      quarto: `${adultos} hóspede(s) · ${quartos} quarto(s)`,
+      hospedes: adultos,
+      quartos,
+      ...(noites > 0 ? { noites } : {}),
+      checkin: entrada,
+      checkout: saida,
+      regime: "Consultar oferta",
+      politica: "Consultar oferta",
+      moeda: "BRL",
+      taxas: 0,
+      // O Places confirma o estabelecimento, mas não fornece tarifa para as datas.
+      // Não inventamos preço: a tela mostra “Consultar”.
+      preco: 0,
+      ...(imagemUrl ? { imagemUrl } : {}),
+      latitude: numero(location.latitude),
+      longitude: numero(location.longitude),
+      endereco: texto(value.formattedAddress) || texto(value.shortFormattedAddress),
+      fonte: "Google Places",
+      consultadoEm: new Date().toISOString(),
+      historico: [],
+    } satisfies OfertaHotel;
+  }));
 }

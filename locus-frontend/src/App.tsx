@@ -51,6 +51,7 @@ import { adicionarRecomendacao, compararVersoes, criarLinkCompartilhamento, cria
 import { limparUsuarioBackend, sincronizarUsuario } from "@/services/usuarioBackend";
 import { criarViagem, listarNotificacoes, listarViagens, marcarLida, marcarTodasComoLidas, obterViagem } from "@/services/viagens";
 import { MapPreview } from "@/components/MapPreview";
+import { GoogleStreetView } from "@/components/GoogleStreetView";
 import { AdminView } from "@/components/AdminView";
 import { PlanningFlow } from "@/components/PlanningFlow";
 import { PreferencesView } from "@/components/PreferencesView";
@@ -1889,11 +1890,7 @@ function AssistantView({
                             : "Sem imagem disponível para este ponto"}
                         </small>
                       </div>
-                      {streetView.embedUrl ? (
-                        <iframe className="street-view-inline-frame" src={streetView.embedUrl} title={`Street View de ${lugar.nome}`} loading="lazy" allowFullScreen />
-                      ) : streetView.imagemUrl ? (
-                        <img src={streetView.imagemUrl} alt={`Street View de ${lugar.nome}`} />
-                      ) : null}
+                      <GoogleStreetView lat={lugar.lat} lng={lugar.lng} className="street-view-inline-frame" />
                       {streetView.mapaUrl && <a href={streetView.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Street View</a>}
                     </div>
                   );
@@ -1927,7 +1924,7 @@ function AssistantView({
             <button className="offer-modal-close" type="button" onClick={() => setStreetViewSelecionado(null)} aria-label="Fechar"><X size={17} /></button>
             <span className="section-label">Antes de adicionar</span>
             <h3>{streetViewSelecionado.lugar.nome}</h3>
-            {streetViewSelecionado.meta.embedUrl ? <iframe className="street-view-frame" src={streetViewSelecionado.meta.embedUrl} title={`Street View de ${streetViewSelecionado.lugar.nome}`} loading="lazy" allowFullScreen /> : streetViewSelecionado.meta.imagemUrl ? <img className="street-view-modal-image" src={streetViewSelecionado.meta.imagemUrl} alt={`Street View de ${streetViewSelecionado.lugar.nome}`} /> : <iframe className="street-view-frame" src={streetViewSelecionado.meta.mapaUrl} title={`Street View de ${streetViewSelecionado.lugar.nome}`} loading="lazy" allowFullScreen />}
+            <GoogleStreetView lat={streetViewSelecionado.lugar.lat} lng={streetViewSelecionado.lugar.lng} />
             <p>{streetViewSelecionado.lugar.endereco || "Local consultado no mapa"}</p>
             <div className="street-view-details">
               <span>{streetViewSelecionado.lugar.categoria}</span>

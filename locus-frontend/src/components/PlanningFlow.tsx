@@ -211,7 +211,7 @@ export function PlanningFlow({
     setCarregando(true);
     void resolverCodigoIata(cidade)
       .then((cityCode) => cityCode
-        ? buscarHoteis({ cityCode, checkInDate: entrada, checkOutDate: saida, adults: pessoas, roomQuantity: quartos })
+        ? buscarHoteis({ cityCode, cityName: cidade, checkInDate: entrada, checkOutDate: saida, adults: pessoas, roomQuantity: quartos })
         : [])
       .then((resultado) => {
         if (ativo) setHoteis(resultado);
@@ -260,10 +260,10 @@ export function PlanningFlow({
       onAdicionar(recomendacaoOferta("voo", `Passagem ${voo.origem} → ${voo.destino}`, `${voo.companhia} · ${dinheiro(voo.preco, voo.moeda)}`, voo.preco, voo.fonte, "passagem"));
     } else {
       const hotel = ofertaSelecionada.valor;
-      onAdicionar(recomendacaoOferta("hospedagem", hotel.hotel, `${hotel.quarto} · ${hotel.preco ? dinheiro(hotel.preco, hotel.moeda) : "Oferta consultada"}`, hotel.preco, hotel.fonte, "hospedagem", {
+      onAdicionar(recomendacaoOferta("hospedagem", hotel.hotel, `${hotel.quarto} · ${hotel.preco ? dinheiro(hotel.preco, hotel.moeda) : "Tarifa a consultar para estas datas"}`, hotel.preco, hotel.fonte, "hospedagem", {
         ...(hotel.latitude != null ? { lat: hotel.latitude } : {}),
         ...(hotel.longitude != null ? { lng: hotel.longitude } : {}),
-        endereco: hotel.hotel,
+        endereco: hotel.endereco || hotel.hotel,
       }));
     }
     setOfertaSelecionada(null);
@@ -314,7 +314,7 @@ export function PlanningFlow({
         onToast("A saída precisa ser posterior à entrada para calcular as noites.");
         return;
       }
-      const resultado = await buscarHoteis({ cityCode, checkInDate: entrada, checkOutDate: saida, adults: pessoas, roomQuantity: quartos });
+      const resultado = await buscarHoteis({ cityCode, cityName: cidade, checkInDate: entrada, checkOutDate: saida, adults: pessoas, roomQuantity: quartos });
       setHoteis(resultado);
       onToast(resultado.length ? "Hospedagens encontradas. Abra uma opção para ver a imagem." : "Nenhuma hospedagem encontrada para esses filtros.");
     } catch (error) {
@@ -356,7 +356,7 @@ export function PlanningFlow({
             <label>Volta<input type="date" value={volta} onChange={(event) => setVolta(event.target.value)} /></label>
           </div>
           <label>Viajantes<input type="number" min="1" max="20" value={pessoas} onChange={(event) => setPessoas(Math.max(1, Number(event.target.value) || 1))} /></label>
-          <button className="secondary-button full-button" disabled={carregando || passagemAdicionada} type="submit"><Search size={15} />{passagemAdicionada ? "Passagem adicionada" : carregando ? "Consultando..." : "Buscar passagens"}</button>
+          <button className="secondary-button full-button" disabled={carregando} type="submit"><Search size={15} />{carregando ? "Consultando..." : passagemAdicionada ? "Buscar outras passagens" : "Buscar passagens"}</button>
           {voos.map((voo) => {
             const acima = !podeAdicionar(voo.preco) || passagemAdicionada;
             return <div className={`offer-result ${acima ? "over-budget" : ""}`} key={voo.id}>
@@ -378,13 +378,13 @@ export function PlanningFlow({
             <label>Hóspedes<input type="number" min="1" max="20" value={pessoas} onChange={(event) => setPessoas(Math.max(1, Number(event.target.value) || 1))} /></label>
             <label>Quartos<input type="number" min="1" max="10" value={quartos} onChange={(event) => setQuartos(Math.max(1, Number(event.target.value) || 1))} /></label>
           </div>
-          <button className="secondary-button full-button" disabled={carregando || hospedagemAdicionada} type="submit"><Search size={15} />{hospedagemAdicionada ? "Hospedagem adicionada" : carregando ? "Consultando..." : "Buscar hospedagens"}</button>
+          <button className="secondary-button full-button" disabled={carregando} type="submit"><Search size={15} />{carregando ? "Consultando..." : hospedagemAdicionada ? "Buscar outras hospedagens" : "Buscar hospedagens"}</button>
           <div className="hotel-offers">
             {hoteis.map((hotel) => {
               const acima = (hotel.preco > 0 && !podeAdicionar(hotel.preco)) || hospedagemAdicionada;
               return <div className={`hotel-offer ${acima ? "over-budget" : ""}`} key={hotel.id}>
                 {hotel.imagemUrl && <img src={hotel.imagemUrl} alt={`Imagem de ${hotel.hotel}`} />}
-                <div className="hotel-offer-body"><strong>{hotel.hotel}</strong><small>{hotel.checkin} → {hotel.checkout} · {hotel.noites ?? "—"} noite(s) · {hotel.hospedes} hóspede(s) · {hotel.fonte}</small><b>{hotel.preco ? dinheiro(hotel.preco, hotel.moeda) : "Consultar"}</b><button type="button" disabled={acima} onClick={() => adicionarHotel(hotel)}><BedDouble size={14} />{hospedagemAdicionada ? "Já adicionada" : acima ? "Acima do limite" : "Ver e escolher"}</button></div>
+                <div className="hotel-offer-body"><strong>{hotel.hotel}</strong><small>{hotel.endereco || cidade} · {hotel.checkin} → {hotel.checkout} · {hotel.noites ?? "—"} noite(s) · {hotel.hospedes} hóspede(s) · {hotel.fonte}</small><b>{hotel.preco ? dinheiro(hotel.preco, hotel.moeda) : "Tarifa a consultar"}</b><button type="button" disabled={acima} onClick={() => adicionarHotel(hotel)}><BedDouble size={14} />{hospedagemAdicionada ? "Já adicionada" : acima ? "Acima do limite" : "Ver e escolher"}</button></div>
               </div>;
             })}
           </div>

@@ -140,6 +140,29 @@
   border-radius: 10px;
   background: #f1ece5;
 }
+.street-view-google {
+  position: relative;
+  overflow: hidden;
+}
+.street-view-google-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+  border-radius: inherit;
+  background: #f1ece5;
+}
+.street-view-error {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  color: #6f5e55;
+  background: rgba(255, 253, 249, .94);
+  font-size: 10px;
+  line-height: 1.35;
+}
 .nav-item svg,
 .icon-button svg,
 .download-button svg,
@@ -647,6 +670,7 @@ button {
 .offer-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .offer-map-link { display: flex; align-items: center; gap: 5px; color: #7667a8; font-size: 10px; }
 .street-view-modal-image, .street-view-frame { width: 100%; height: 220px; border: 0; border-radius: 10px; object-fit: cover; background: #f1ece5; }
+.street-view-frame .street-view-google-canvas { height: 220px; }
 .street-view-modal .secondary-button { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 .profile-trigger {
   display: inline-flex;
