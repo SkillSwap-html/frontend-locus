@@ -21,6 +21,7 @@ import {
   Plus,
   Search,
   Settings2,
+  ShieldCheck,
   Sparkles,
   WalletCards,
   X,
@@ -30,23 +31,31 @@ import { api, normalizarErro } from "@/services/api";
 import { entrar, entrarComGoogle, sair, usuarioAtual } from "@/services/auth";
 import {
   buscaTextual,
+  calcularRota,
   perguntarGemini,
   streetViewMetadata,
   type StreetViewMeta,
+  type Trecho,
 } from "@/services/integracoes";
+import { lerPreferenciasBackend } from "@/services/preferencias";
 import { confirmarRoteiro } from "@/services/reservas";
 import { baixarRelatorio, listarRelatorios } from "@/services/relatorios";
 import { adicionarRecomendacao, criarRoteiroInicial } from "@/services/roteiros";
 import { sincronizarUsuario } from "@/services/usuarioBackend";
 import { criarViagem, listarViagens, obterViagem } from "@/services/viagens";
 import { MapPreview } from "@/components/MapPreview";
+import { AdminView } from "@/components/AdminView";
+import { PlanningFlow } from "@/components/PlanningFlow";
+import { PreferencesView } from "@/components/PreferencesView";
 import { brl, CATEGORIAS, resumirOrcamento } from "@/features/budget/logic";
 import type {
   CategoriaOrcamento,
+  ItemOrcamento,
   ItemRoteiro,
   Lugar,
   MensagemAssistente,
   ModoOrcamento,
+  Preferencias,
   Recomendacao,
   Relatorio,
   Transporte,
@@ -54,7 +63,7 @@ import type {
   Viagem,
 } from "@/types";
 
-type View = "inicio" | "viagem" | "nova" | "ia" | "perfil";
+type View = "inicio" | "viagem" | "nova" | "ia" | "perfil" | "preferencias" | "admin";
 const LIMITES: Record<CategoriaOrcamento, number> = {
   passagem: 0,
   hospedagem: 0,
@@ -96,7 +105,50 @@ function dataBr(data?: string): string {
   return ano && mes && dia ? `${dia}/${mes}/${ano}` : data;
 }
 function totalViagem(viagem: Viagem): number {
-  return (viagem.orcamento ?? []).reduce((total, item) => total + Number(item.valor || 0), 0);
+  const itensOrcamento = (viagem.orcamento ?? []).reduce((total, item) => total + Number(item.valor || 0), 0);
+  const itensRoteiro = (viagem.roteiro ?? []).reduce((total, item) => total + Number(item.valorEstimado || 0), 0);
+  return itensOrcamento + itensRoteiro;
+}
+function itensParaResumo(viagem: Viagem): ItemOrcamento[] {
+  const roteiro = (viagem.roteiro ?? [])
+    .filter((item) => Number(item.valorEstimado || 0) > 0)
+    .map((item) => ({
+      id: `roteiro-${item.id}`,
+      categoria: "visitas" as CategoriaOrcamento,
+      descricao: item.titulo,
+      valor: Number(item.valorEstimado || 0),
+      natureza: "simulado" as ItemOrcamento["natureza"],
+    }));
+  return [...(viagem.orcamento ?? []), ...roteiro];
+}
+function distanciaKm(a: Pick<Lugar, "lat" | "lng">, b: Pick<Lugar, "lat" | "lng">): number {
+  const raio = 6371;
+  const latitude = ((b.lat - a.lat) * Math.PI) / 180;
+  const longitude = ((b.lng - a.lng) * Math.PI) / 180;
+  const origem = (a.lat * Math.PI) / 180;
+  const destino = (b.lat * Math.PI) / 180;
+  const seno = Math.sin(latitude / 2) ** 2 + Math.cos(origem) * Math.cos(destino) * Math.sin(longitude / 2) ** 2;
+  return raio * 2 * Math.atan2(Math.sqrt(seno), Math.sqrt(1 - seno));
+}
+function ordenarLugares(lugares: Lugar[]): Lugar[] {
+  if (lugares.length < 2) return lugares;
+  const resultado: Lugar[] = [lugares[0]!];
+  const restantes = lugares.slice(1);
+  while (restantes.length) {
+    const ultimo = resultado[resultado.length - 1]!;
+    let indice = 0;
+    let menor = Number.POSITIVE_INFINITY;
+    restantes.forEach((item, atual) => {
+      const distancia = distanciaKm(ultimo, item);
+      if (distancia < menor) {
+        menor = distancia;
+        indice = atual;
+      }
+    });
+    const [proximo] = restantes.splice(indice, 1);
+    if (proximo) resultado.push({ ...proximo, distanciaKm: menor });
+  }
+  return resultado;
 }
 function formatarTransporte(value: string): string {
   return (
@@ -132,7 +184,10 @@ function App() {
     if (!usuario) return;
     void (async () => {
       try {
-        await sincronizarUsuario(usuario);
+        const sincronizado = await sincronizarUsuario(usuario);
+        if (sincronizado.tipoUsuario === "ADMINISTRADOR") {
+          setUsuario((atual) => (atual ? { ...atual, papel: "admin" } : atual));
+        }
       } catch (error) {
         setToast(normalizarErro(error).message);
       }
@@ -267,11 +322,17 @@ function App() {
         <div className="sidebar-bottom">
           <button
             className="nav-item muted"
-            onClick={() => setToast("As preferências ficam vinculadas ao seu perfil do viajante.")}
+            onClick={() => navegar("preferencias")}
           >
             <Settings2 size={18} />
             <span>Preferências</span>
           </button>
+          {usuario.papel === "admin" && (
+            <button className="nav-item muted" onClick={() => navegar("admin")}>
+              <ShieldCheck size={18} />
+              <span>Administração</span>
+            </button>
+          )}
           <div className="sidebar-user">
             <Avatar nome={usuario.nome} />
             <div>
@@ -378,6 +439,7 @@ function App() {
               viagens={viagens}
               relatorios={relatorios}
               onAbrir={abrirViagem}
+              onPreferencias={() => navegar("preferencias")}
               onBaixar={async (relatorio) => {
                 try {
                   const blob = await baixarRelatorio(relatorio);
@@ -394,6 +456,8 @@ function App() {
               }}
             />
           )}
+          {view === "preferencias" && <PreferencesView onToast={setToast} />}
+          {view === "admin" && usuario.papel === "admin" && <AdminView onToast={setToast} />}
         </div>
       </main>
       {toast && (
@@ -874,7 +938,7 @@ function TripView({
   const itens = viagem.roteiro ?? [];
   const dias = [...new Set(itens.map((item) => item.dia))];
   const resumo = resumirOrcamento(
-    viagem.orcamento ?? [],
+    itensParaResumo(viagem),
     viagem.limites ?? LIMITES,
     viagem.modoOrcamento ?? "aberto",
   );
@@ -995,7 +1059,15 @@ function AssistantView({
   const [busca, setBusca] = useState("");
   const [lugares, setLugares] = useState<Lugar[]>([]);
   const [streetViews, setStreetViews] = useState<Record<string, StreetViewMeta>>({});
+  const [preferencias, setPreferencias] = useState<Preferencias | null>(null);
+  const [rota, setRota] = useState<Trecho[]>([]);
   const [enviando, setEnviando] = useState(false);
+  useEffect(() => {
+    void lerPreferenciasBackend().then(setPreferencias).catch(() => undefined);
+  }, []);
+  const modoOrcamento = preferencias?.modoOrcamento ?? viagem?.modoOrcamento ?? "aberto";
+  const limite = modoOrcamento === "fixo" ? preferencias?.limites.extras ?? viagem?.limites.extras : undefined;
+  const acumulado = viagem ? totalViagem(viagem) : 0;
   async function enviar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!texto.trim() || enviando) return;
@@ -1010,8 +1082,28 @@ function AssistantView({
     setMensagens((atuais) => [...atuais, user]);
     setEnviando(true);
     try {
-      const resposta = await perguntarGemini([...mensagens, user], pergunta);
+      const resposta = await perguntarGemini([...mensagens, user], pergunta, {
+        modoOrcamento,
+        limite,
+        acumulado,
+        destino: viagem?.destino,
+      });
       setMensagens((atuais) => [...atuais, resposta]);
+      const consultas = resposta.consultas?.length ? resposta.consultas : [pergunta];
+      const resultados = await Promise.all(consultas.slice(0, 3).map((consulta) => buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }))));
+      const encontrados = resultados.flatMap((item) => item.lugares);
+      if (encontrados.length) {
+        const unicos = [...new Map(encontrados.map((item) => [item.placeId, item])).values()];
+        const organizados = ordenarLugares(unicos);
+        setLugares(organizados);
+        setStreetViews({});
+        if (organizados.length > 1) {
+          const trechos = await calcularRota(organizados.slice(0, 6).map((item) => ({ lat: item.lat, lng: item.lng, nome: item.nome }))).catch(() => []);
+          setRota(trechos);
+        } else {
+          setRota([]);
+        }
+      }
     } catch (error) {
       onToast(normalizarErro(error).message);
     } finally {
@@ -1023,7 +1115,14 @@ function AssistantView({
     if (!busca.trim()) return;
     try {
       const resultado = await buscaTextual(busca);
-      setLugares(resultado.lugares);
+      const organizados = ordenarLugares(resultado.lugares);
+      setLugares(organizados);
+      if (organizados.length > 1) {
+        const trechos = await calcularRota(organizados.slice(0, 6).map((item) => ({ lat: item.lat, lng: item.lng, nome: item.nome }))).catch(() => []);
+        setRota(trechos);
+      } else {
+        setRota([]);
+      }
       setStreetViews({});
     } catch (error) {
       onToast(normalizarErro(error).message);
@@ -1042,6 +1141,35 @@ function AssistantView({
     } catch (error) {
       onToast(normalizarErro(error).message);
     }
+  }
+  function distanciaTexto(lugar: Lugar): string {
+    const referencia = lugares[0];
+    if (!referencia || referencia.placeId === lugar.placeId) return "Ponto de referência";
+    const distancia = distanciaKm(referencia, lugar);
+    const leitura = distancia <= 10 ? "perto" : distancia <= 30 ? "viável com deslocamento" : "longe; melhor separar em outro dia";
+    return `${distancia.toFixed(1)} km do primeiro ponto · ${leitura}`;
+  }
+  function adicionarLugar(lugar: Lugar) {
+    if (!streetViews[lugar.placeId]) {
+      onToast("Confira o Street View antes de adicionar este lugar ao roteiro.");
+      void revisarLugar(lugar);
+      return;
+    }
+    onAdicionar({
+      id: `lugar-${lugar.placeId}`,
+      tipo: "lugar",
+      titulo: lugar.nome,
+      resumo: `${lugar.categoria} · ${lugar.endereco}`,
+      justificativa: "Lugar consultado no Google Places e escolhido por você.",
+      evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
+    });
+  }
+  function adicionarRecomendacaoControlada(recomendacao: Recomendacao) {
+    if (limite != null && Number(recomendacao.valor || 0) > Math.max(0, limite - acumulado)) {
+      onToast("Essa recomendação ultrapassa o saldo restante do seu orçamento.");
+      return;
+    }
+    onAdicionar(recomendacao);
   }
   return (
     <section className="view-stack">
@@ -1090,10 +1218,10 @@ function AssistantView({
                       <div>
                         <strong>{recomendacao.titulo}</strong>
                         <span>{recomendacao.resumo}</span>
-                        <small>{recomendacao.justificativa}</small>
+                        <small>{recomendacao.justificativa} · {recomendacao.evidencia.fonte}{recomendacao.valor ? ` · ${brl(recomendacao.valor)}` : ""}</small>
                       </div>
                       <button
-                        onClick={() => onAdicionar(recomendacao)}
+                        onClick={() => adicionarRecomendacaoControlada(recomendacao)}
                       >
                         <Plus size={15} />
                       </button>
@@ -1124,6 +1252,14 @@ function AssistantView({
           </form>
         </div>
         <aside className="assistant-side">
+          <PlanningFlow
+            viagem={viagem}
+            etapaInicial="passagem"
+            limite={limite}
+            acumulado={acumulado}
+            onToast={onToast}
+            onAdicionar={adicionarRecomendacaoControlada}
+          />
           <div className="side-card search-card">
             <div className="side-card-heading">
               <div>
@@ -1145,11 +1281,9 @@ function AssistantView({
                 <MapPreview lugares={lugares.slice(0, 4)} />
                 <div className="place-results">
                   {lugares.slice(0, 4).map((lugar) => (
-                    <button
+                    <div
                       key={lugar.placeId}
                       className="place-result"
-                      type="button"
-                      onClick={() => void revisarLugar(lugar)}
                     >
                       <span className="place-icon">
                         <MapPin size={15} />
@@ -1157,13 +1291,22 @@ function AssistantView({
                       <span>
                         <strong>{lugar.nome}</strong>
                         <small>
-                          {lugar.categoria} · {lugar.endereco}
+                          {lugar.categoria} · {distanciaTexto(lugar)}
                         </small>
                       </span>
-                      <ChevronRight size={15} />
-                    </button>
+                      <div className="place-actions">
+                        <button type="button" onClick={() => void revisarLugar(lugar)}>Street View</button>
+                        <button type="button" onClick={() => adicionarLugar(lugar)}>{streetViews[lugar.placeId] ? "Adicionar" : "Ver antes"}</button>
+                      </div>
+                    </div>
                   ))}
                 </div>
+                {rota.length > 0 && (
+                  <div className="route-preview">
+                    <strong>Rota sugerida por proximidade</strong>
+                    {rota.map((trecho) => <span key={`${trecho.de}-${trecho.para}`}>{trecho.de} → {trecho.para}: {trecho.km.toFixed(1)} km · {trecho.minutos} min</span>)}
+                  </div>
+                )}
                 {lugares.slice(0, 4).map((lugar) => {
                   const streetView = streetViews[lugar.placeId];
                   if (!streetView) return null;
@@ -1180,6 +1323,7 @@ function AssistantView({
                       {streetView.imagemUrl && (
                         <img src={streetView.imagemUrl} alt={`Street View de ${lugar.nome}`} />
                       )}
+                      {streetView.mapaUrl && <a href={streetView.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Street View</a>}
                     </div>
                   );
                 })}
@@ -1215,12 +1359,14 @@ function ProfileView({
   viagens,
   relatorios,
   onAbrir,
+  onPreferencias,
   onBaixar,
 }: {
   usuario: Usuario;
   viagens: Viagem[];
   relatorios: Relatorio[];
   onAbrir: (viagem: Viagem) => void;
+  onPreferencias: () => void;
   onBaixar: (relatorio: Relatorio) => Promise<void>;
 }) {
   return (
@@ -1236,7 +1382,7 @@ function ProfileView({
             {usuario.email} <span className="bullet">·</span> Viajante Locus
           </p>
         </div>
-        <button className="secondary-button profile-edit">
+        <button className="secondary-button profile-edit" onClick={onPreferencias}>
           <Settings2 size={17} /> Preferências
         </button>
       </div>

@@ -74,7 +74,7 @@ export async function adicionarRecomendacao(
         titulo: recomendacao.titulo,
         horarioInicio: "10:00",
         duracaoMinutos: 90,
-        custoEstimado: 0,
+        custoEstimado: recomendacao.valor ?? 0,
         observacoes: recomendacao.resumo,
         motivoRecomendacao: recomendacao.justificativa,
       },

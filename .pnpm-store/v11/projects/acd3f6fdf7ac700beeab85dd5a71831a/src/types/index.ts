@@ -49,6 +49,8 @@ export interface ItemRoteiro {
   lat?: number;
   lng?: number;
   endereco?: string;
+  valorEstimado?: number;
+  fonteValor?: string;
 }
 
 export interface ItemOrcamento {
@@ -164,6 +166,10 @@ export interface Recomendacao {
   resumo: string;
   justificativa: string;
   evidencia: { fonte: string; consultadoEm: string };
+  consulta?: string;
+  valor?: number;
+  categoria?: CategoriaOrcamento;
+  natureza?: NaturezaValor;
   estado?: "aceita" | "rejeitada";
 }
 
@@ -172,6 +178,8 @@ export interface MensagemAssistente {
   autor: "usuario" | "assistente";
   texto: string;
   recomendacoes?: Recomendacao[];
+  consultas?: string[];
+  etapa?: "passagem" | "hospedagem" | "roteiro" | "geral";
   incompleta?: boolean;
   criadaEm: string;
 }

@@ -39,6 +39,10 @@ function normalizarLugar(raw: unknown): Lugar {
 
 function textoGemini(raw: unknown): string {
   const root = objeto(raw);
+  const choices = Array.isArray(root.choices) ? root.choices : [];
+  const choiceMessage = objeto(objeto(choices[0]).message);
+  const choiceText = texto(choiceMessage.content);
+  if (choiceText) return choiceText;
   const candidates = Array.isArray(root.candidates) ? root.candidates : [];
   const first = objeto(candidates[0]);
   const content = objeto(first.content);
@@ -49,23 +53,102 @@ function textoGemini(raw: unknown): string {
     .join("\n");
 }
 
+function jsonDaResposta(textoResposta: string): Json {
+  const limpo = textoResposta
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  try {
+    return objeto(JSON.parse(limpo));
+  } catch {
+    const inicio = limpo.indexOf("{");
+    const fim = limpo.lastIndexOf("}");
+    if (inicio >= 0 && fim > inicio) {
+      try {
+        return objeto(JSON.parse(limpo.slice(inicio, fim + 1)));
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  }
+}
+
+function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoes"] {
+  if (!Array.isArray(raw)) return undefined;
+  return raw.map((item: Json, index) => {
+    const value = objeto(item);
+    const evidencia = objeto(value.evidencia);
+    const categoria = texto(value.categoria) as NonNullable<MensagemAssistente["recomendacoes"]>[number]["categoria"];
+    const natureza = texto(value.natureza) as NonNullable<MensagemAssistente["recomendacoes"]>[number]["natureza"];
+    return {
+      id: texto(value.id) || `recomendacao-${Date.now()}-${index}`,
+      tipo: (texto(value.tipo) || "lugar") as NonNullable<MensagemAssistente["recomendacoes"]>[number]["tipo"],
+      titulo: texto(value.titulo) || "Sugestão de viagem",
+      resumo: texto(value.resumo) || "Confira esta possibilidade antes de adicionar ao roteiro.",
+      justificativa: texto(value.justificativa) || "Combina com o contexto informado.",
+      evidencia: {
+        fonte: texto(evidencia.fonte) || "Consulta do Locus",
+        consultadoEm: texto(evidencia.consultadoEm) || new Date().toISOString(),
+      },
+      ...(texto(value.consulta) ? { consulta: texto(value.consulta) } : {}),
+      ...(Number.isFinite(Number(value.valor)) ? { valor: Number(value.valor) } : {}),
+      ...(categoria ? { categoria } : {}),
+      ...(natureza ? { natureza } : {}),
+    };
+  });
+}
+
+function interpretarAssistente(raw: unknown): Pick<MensagemAssistente, "texto" | "recomendacoes" | "consultas" | "etapa"> {
+  const textoResposta = textoGemini(raw);
+  const objetoResposta = jsonDaResposta(textoResposta);
+  const consultas = Array.isArray(objetoResposta.consultas)
+    ? objetoResposta.consultas.map(texto).filter(Boolean)
+    : [];
+  const etapa = texto(objetoResposta.etapa) as MensagemAssistente["etapa"];
+  const recomendacoes = normalizarRecomendacoes(objetoResposta.recomendacoes);
+  return {
+    texto: texto(objetoResposta.resposta) || textoResposta || "Recebi uma resposta vazia. Tente reformular a pergunta.",
+    ...(consultas.length ? { consultas } : {}),
+    ...(recomendacoes?.length ? { recomendacoes } : {}),
+    ...(etapa ? { etapa } : {}),
+  };
+}
+
 // ---------- Assistente Locus (Gemini com fallback Groq no backend) ----------
 export async function perguntarGemini(
   historico: MensagemAssistente[],
   textoPergunta: string,
+  contexto?: {
+    modoOrcamento?: "fixo" | "aberto";
+    limite?: number;
+    acumulado?: number;
+    destino?: string;
+  },
 ): Promise<MensagemAssistente> {
-  const contexto = historico
+  const historicoTexto = historico
     .slice(-8)
     .map((item) => `${item.autor === "usuario" ? "Usuário" : "Assistente"}: ${item.texto}`)
     .join("\n");
-  const prompt = [contexto, `Usuário: ${textoPergunta}`].filter(Boolean).join("\n\n");
+  const financeiro = contexto
+    ? `Contexto financeiro: orçamento ${contexto.modoOrcamento === "fixo" ? "FIXO" : "ABERTO"}; `
+      + `valor já acumulado R$ ${(contexto.acumulado ?? 0).toFixed(2)}; `
+      + (contexto.limite == null
+        ? "sem limite máximo."
+        : `limite total R$ ${contexto.limite.toFixed(2)} e saldo restante R$ ${Math.max(0, contexto.limite - (contexto.acumulado ?? 0)).toFixed(2)}.`)
+    : "";
+  const destino = contexto?.destino ? `Destino atual: ${contexto.destino}.` : "";
+  const prompt = [financeiro, destino, historicoTexto, `Usuário: ${textoPergunta}`]
+    .filter(Boolean)
+    .join("\n\n");
   const raw = await chamar(() =>
     api.post<Json>(`${BASE}/gemini/conteudo`, { prompt }, { timeout: 30000 }),
   );
+  const interpretada = interpretarAssistente(raw);
   return {
     id: uid(),
     autor: "assistente",
-    texto: textoGemini(raw) || "Recebi uma resposta vazia. Tente reformular a pergunta.",
+    ...interpretada,
     criadaEm: new Date().toISOString(),
   };
 }
@@ -153,6 +236,7 @@ export async function calcularRota(
 export interface StreetViewMeta {
   status: string;
   imagemUrl?: string;
+  mapaUrl?: string;
   data?: string;
 }
 
@@ -163,12 +247,15 @@ export async function streetViewMetadata(lat: number, lng: number): Promise<Stre
     }),
   );
   const key = import.meta.env["VITE_GOOGLE_MAPS_API_KEY"] as string | undefined;
-  return key && resultado.status === "OK"
-    ? {
-        ...resultado,
-        imagemUrl: `https://maps.googleapis.com/maps/api/streetview?size=640x360&location=${lat},${lng}&key=${encodeURIComponent(key)}`,
-      }
-    : resultado;
+  return {
+    ...resultado,
+    ...(key && resultado.status === "OK"
+      ? {
+          imagemUrl: `https://maps.googleapis.com/maps/api/streetview?size=640x360&location=${lat},${lng}&key=${encodeURIComponent(key)}`,
+        }
+      : {}),
+    mapaUrl: `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`,
+  };
 }
 
 // ---------- Catálogo de ofertas do Locus ----------

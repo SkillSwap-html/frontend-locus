@@ -77,8 +77,8 @@ export function MapPreview({ lugares }: { lugares: Lugar[] }) {
   if (!key)
     return (
       <div className="map-preview map-preview-empty">
-        <strong>Mapa aguardando configuração</strong>
-        <span>Preencha VITE_GOOGLE_MAPS_API_KEY no .env do frontend.</span>
+        <strong>Mapa interativo indisponível neste momento</strong>
+        <span>Você ainda pode conferir o endereço e abrir o Street View de cada lugar.</span>
       </div>
     );
   if (erro) return <div className="map-preview map-preview-empty">{erro}</div>;

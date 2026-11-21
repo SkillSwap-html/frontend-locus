@@ -53,7 +53,7 @@ async function hidratar(raw: Record<string, unknown>): Promise<Viagem> {
     dataInicio: String(raw["dataInicio"] ?? ""),
     dataFim: String(raw["dataFim"] ?? ""),
     transporte: transporte(raw["modoTransporte"]),
-    modoOrcamento: "aberto",
+    modoOrcamento: String(raw["tipoOrcamento"] ?? "").toUpperCase() === "FIXO" ? "fixo" : "aberto",
     limites: limitesVazios(),
     roteiro: [],
     versoes: [],
@@ -91,6 +91,12 @@ async function hidratar(raw: Record<string, unknown>): Promise<Viagem> {
       duracaoMin: Number(item["duracaoMinutos"] ?? 60),
       deslocamentoMin: 0,
       margemMin: 15,
+      ...(Number(item["custoEstimado"] ?? 0) > 0
+        ? { valorEstimado: Number(item["custoEstimado"]) }
+        : {}),
+      ...(String(item["fonteValor"] ?? "")
+        ? { fonteValor: String(item["fonteValor"]) }
+        : {}),
       ...(String(item["observacoes"] ?? "") ? { observacoes: String(item["observacoes"]) } : {}),
       favorito: Boolean(item["favorito"]),
       ...(String(item["motivoRecomendacao"] ?? "")
@@ -167,6 +173,7 @@ export async function criarViagem(
             particular: "VEICULO_PARTICULAR",
           } as Record<string, string>
         )[dados.transporte],
+        tipoOrcamento: dados.modoOrcamento === "fixo" ? "FIXO" : "ABERTO",
       },
       { params: { usuarioSolicitanteId: backendUserId() } },
     ),

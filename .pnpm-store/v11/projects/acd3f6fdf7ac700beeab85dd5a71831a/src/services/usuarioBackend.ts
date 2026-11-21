@@ -9,7 +9,7 @@ export function backendUserId(): number {
   return Number(import.meta.env["VITE_BACKEND_USER_ID"] ?? "1");
 }
 
-export async function sincronizarUsuario(usuario: Usuario): Promise<number> {
+export async function sincronizarUsuario(usuario: Usuario): Promise<{ id: number; tipoUsuario?: string }> {
   const body = {
     firebaseUid: usuario.uid,
     nome: usuario.nome,
@@ -18,11 +18,11 @@ export async function sincronizarUsuario(usuario: Usuario): Promise<number> {
     tipoUsuario: "VIAJANTE",
   };
   try {
-    const criado = await chamar<{ id: number }>(() => api.post("/api/usuarios", body));
+    const criado = await chamar<{ id: number; tipoUsuario?: string }>(() => api.post("/api/usuarios", body));
     localStorage.setItem(STORAGE_KEY, String(criado.id));
-    return criado.id;
+    return criado;
   } catch {
-    const usuarios = await chamar<Array<{ id: number; email: string; firebaseUid?: string }>>(() =>
+    const usuarios = await chamar<Array<{ id: number; email: string; firebaseUid?: string; tipoUsuario?: string }>>(() =>
       api.get("/api/usuarios"),
     );
     const encontrado = usuarios.find(
@@ -32,6 +32,6 @@ export async function sincronizarUsuario(usuario: Usuario): Promise<number> {
     );
     if (!encontrado) throw new Error("Não foi possível preparar seu perfil. Tente novamente.");
     localStorage.setItem(STORAGE_KEY, String(encontrado.id));
-    return encontrado.id;
+    return encontrado;
   }
 }
