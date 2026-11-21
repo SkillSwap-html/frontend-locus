@@ -31,6 +31,7 @@ import {
 import { api, normalizarErro } from "@/services/api";
 import { entrar, entrarComGoogle, sair, usuarioAtual } from "@/services/auth";
 import {
+  autocomplete,
   buscaTextual,
   calcularRota,
   perguntarGemini,
@@ -871,13 +872,13 @@ function NovaViagemView({
               onChange={(value) => update("titulo", value)}
               placeholder="Ex.: Férias em família"
             />
-            <Field
+            <LocationField
               label="De onde você sai?"
               value={form.origem}
               onChange={(value) => update("origem", value)}
               placeholder="Cidade ou aeroporto"
             />
-            <Field
+            <LocationField
               label="Para onde você vai?"
               value={form.destino}
               onChange={(value) => update("destino", value)}
@@ -1763,6 +1764,88 @@ function Field({
     </label>
   );
 }
+
+function LocationField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  wide = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  wide?: boolean;
+}) {
+  const [suggestions, setSuggestions] = useState<{ id: string; texto: string }[]>([]);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    const query = value.trim();
+    if (query.length < 2) {
+      setSuggestions([]);
+      setOpen(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void autocomplete(query)
+        .then((items) => {
+          setSuggestions(items);
+          setOpen(items.length > 0);
+        })
+        .catch(() => {
+          setSuggestions([]);
+          setOpen(false);
+        });
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [value]);
+
+  return (
+    <label className={`field ${wide ? "wide" : ""}`}>
+      {label}
+      <div className="autocomplete-wrap">
+        <input
+          type="text"
+          value={value}
+          onChange={(event) => {
+            onChange(event.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(suggestions.length > 0)}
+          onBlur={() => window.setTimeout(() => setOpen(false), 180)}
+          placeholder={placeholder}
+          autoComplete="off"
+          required
+        />
+        {open && suggestions.length > 0 ? (
+          <div className="autocomplete-list" role="listbox">
+            {suggestions.map((item) => (
+              <button
+                key={item.id || item.texto}
+                type="button"
+                className="autocomplete-option"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onChange(item.texto);
+                  setSuggestions([]);
+                  setOpen(false);
+                }}
+              >
+                <MapPin size={14} />
+                <span>{item.texto}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </label>
+  );
+}
+
 function SelectField({
   label,
   value,
