@@ -47,7 +47,7 @@ import {
 import { lerPreferenciasBackend } from "@/services/preferencias";
 import { cancelarSimulacao, confirmarRoteiro, listarReservas } from "@/services/reservas";
 import { baixarRelatorio, listarRelatorios } from "@/services/relatorios";
-import { adicionarRecomendacao, compararVersoes, criarLinkCompartilhamento, criarRoteiroInicial, criarVersao, editarItemRoteiro, excluirItemRoteiro, restaurarVersao } from "@/services/roteiros";
+import { adicionarRecomendacao, compararVersoes, criarLinkCompartilhamento, criarRoteiroInicial, criarVersao, editarItemRoteiro, excluirItemOrcamento, excluirItemRoteiro, restaurarVersao } from "@/services/roteiros";
 import { limparUsuarioBackend, sincronizarUsuario } from "@/services/usuarioBackend";
 import { criarViagem, listarNotificacoes, listarViagens, marcarLida, marcarTodasComoLidas, obterViagem } from "@/services/viagens";
 import { MapPreview } from "@/components/MapPreview";
@@ -292,6 +292,14 @@ function App() {
       setToast("Abra uma viagem para guardar essa sugestão no roteiro.");
       return;
     }
+    if (recomendacao.tipo === "voo" && selecionada.orcamento?.some((item) => item.categoria === "passagem")) {
+      setToast("Esta viagem já tem uma passagem. Remova a anterior na aba Orçamento antes de escolher outra.");
+      return;
+    }
+    if (recomendacao.tipo === "hospedagem" && selecionada.orcamento?.some((item) => item.categoria === "hospedagem")) {
+      setToast("Esta viagem já tem uma hospedagem. Remova a anterior na aba Orçamento antes de escolher outra.");
+      return;
+    }
     setCarregando(true);
     try {
       const atualizada = await adicionarRecomendacao(selecionada.id, recomendacao);
@@ -313,6 +321,21 @@ function App() {
       setSelecionada(atualizada);
       setViagens((atuais) => atuais.map((itemViagem) => itemViagem.id === atualizada.id ? atualizada : itemViagem));
       setToast("Item removido do roteiro.");
+    } catch (error) {
+      setToast(normalizarErro(error).message);
+    } finally {
+      setCarregando(false);
+    }
+  }
+  async function removerDoOrcamento(item: ItemOrcamento) {
+    if (!selecionada) return;
+    setCarregando(true);
+    try {
+      await excluirItemOrcamento(item);
+      const atualizada = await obterViagem(selecionada.id);
+      setSelecionada(atualizada);
+      setViagens((atuais) => atuais.map((itemViagem) => itemViagem.id === atualizada.id ? atualizada : itemViagem));
+      setToast("Escolha removida do orçamento. Você pode selecionar outra oferta.");
     } catch (error) {
       setToast(normalizarErro(error).message);
     } finally {
@@ -522,6 +545,7 @@ function App() {
               onIA={() => navegar("ia")}
               onConfirmar={() => selecionada && void confirmar(selecionada)}
               onRemoverItem={(item) => void removerDoRoteiro(item)}
+              onRemoverOrcamento={(item) => void removerDoOrcamento(item)}
               onEditarItem={(item) => void editarNoRoteiro(item)}
               onCompartilhar={() => selecionada && void compartilharViagem(selecionada)}
               onAtualizar={(atualizada) => {
@@ -1035,6 +1059,7 @@ function TripView({
   onIA,
   onConfirmar,
   onRemoverItem,
+  onRemoverOrcamento,
   onEditarItem,
   onCompartilhar,
   onAtualizar,
@@ -1046,6 +1071,7 @@ function TripView({
   onIA: () => void;
   onConfirmar: () => void;
   onRemoverItem: (item: ItemRoteiro) => void;
+  onRemoverOrcamento: (item: ItemOrcamento) => void;
   onEditarItem: (item: ItemRoteiro) => void;
   onCompartilhar: () => void;
   onAtualizar: (viagem: Viagem) => void;
@@ -1230,7 +1256,7 @@ function TripView({
           </aside>
         </div>
       )}
-      {aba === "orcamento" && <BudgetView viagem={viagem} resumo={resumo} />}
+      {aba === "orcamento" && <BudgetView viagem={viagem} resumo={resumo} onRemover={onRemoverOrcamento} />}
       {aba === "resumo" && (
         <FinalSummary
           viagem={viagem}
@@ -1572,11 +1598,27 @@ function AssistantView({
       onToast("Essa recomendação ultrapassa o saldo restante do seu orçamento.");
       return;
     }
+    let recomendacaoFinal = recomendacao;
+    if (viagem && (recomendacao.tipo === "lugar" || recomendacao.tipo === "atividade")) {
+      const totalDias = viagem.dataInicio && viagem.dataFim
+        ? Math.max(1, Math.floor((new Date(`${viagem.dataFim}T12:00:00`).getTime() - new Date(`${viagem.dataInicio}T12:00:00`).getTime()) / 86400000) + 1)
+        : 1;
+      let dia = Math.max(1, Math.min(totalDias, recomendacao.dia ?? 1));
+      while (dia < totalDias && (viagem.roteiro ?? []).filter((item) => item.dia === dia).length >= 4) dia += 1;
+      if ((viagem.roteiro ?? []).filter((item) => item.dia === dia).length >= 4) {
+        onToast("Este roteiro já tem 4 atividades por dia. Remova uma ou escolha outro dia.");
+        return;
+      }
+      if (dia !== (recomendacao.dia ?? 1)) {
+        recomendacaoFinal = { ...recomendacao, dia };
+        onToast(`O Dia ${recomendacao.dia ?? 1} está cheio. Esta atividade será sugerida para o Dia ${dia}.`);
+      }
+    }
     if (recomendacao.tipo === "hospedagem" && recomendacao.lat != null && recomendacao.lng != null) {
       setHospedagemBase({ nome: recomendacao.titulo, lat: recomendacao.lat, lng: recomendacao.lng });
       onToast(`Hospedagem escolhida. As próximas recomendações ficarão em até 20 km dela.`);
     }
-    onAdicionar(recomendacao);
+    onAdicionar(recomendacaoFinal);
   }
   return (
     <section className="view-stack">
@@ -1966,9 +2008,11 @@ function SummaryCard({
 function BudgetView({
   viagem,
   resumo,
+  onRemover,
 }: {
   viagem: Viagem;
   resumo: ReturnType<typeof resumirOrcamento>;
+  onRemover: (item: ItemOrcamento) => void;
 }) {
   return (
     <div className="budget-page">
@@ -1992,6 +2036,22 @@ function BudgetView({
             <small>{item.limite ? `Limite ${brl(item.limite)}` : "Sem limite definido"}</small>
           </div>
         ))}
+      </div>
+      <div className="budget-items surface-panel">
+        <div className="summary-title">
+          <span className="section-label">Escolhas adicionadas</span>
+          <WalletCards size={18} />
+        </div>
+        {viagem.orcamento?.length ? viagem.orcamento.map((item) => (
+          <div className="budget-item-row" key={item.id}>
+            <div>
+              <strong>{item.descricao}</strong>
+              <small>{rotuloCategoria(item.categoria)} · {item.natureza}</small>
+            </div>
+            <b>{brl(item.valor)}</b>
+            <button className="icon-button danger-icon" type="button" onClick={() => onRemover(item)} aria-label={`Remover ${item.descricao}`}><Trash2 size={14} /></button>
+          </div>
+        )) : <p>Nenhuma passagem ou hospedagem foi adicionada ainda.</p>}
       </div>
     </div>
   );

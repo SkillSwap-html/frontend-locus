@@ -147,6 +147,7 @@ export interface OfertaVoo {
   ida: string;
   volta?: string;
   passageiros: number;
+  idaEVolta?: boolean;
   classe: string;
   bagagem: string;
   moeda: string;
@@ -163,6 +164,8 @@ export interface OfertaHotel {
   hotel: string;
   quarto: string;
   hospedes: number;
+  quartos?: number;
+  noites?: number;
   checkin: string;
   checkout: string;
   regime: string;

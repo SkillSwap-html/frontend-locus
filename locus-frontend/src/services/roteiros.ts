@@ -1,4 +1,4 @@
-import type { CategoriaOrcamento, ItemRoteiro, Recomendacao, VersaoRoteiro, Viagem } from "@/types";
+import type { CategoriaOrcamento, ItemOrcamento, ItemRoteiro, Recomendacao, VersaoRoteiro, Viagem } from "@/types";
 import { api, chamar } from "./api";
 import { obterViagem } from "./viagens";
 import { backendUserId } from "./usuarioBackend";
@@ -124,6 +124,12 @@ export async function excluirItemRoteiro(item: ItemRoteiro): Promise<void> {
       usuarioId: backendUserId(),
       versaoEsperada: item.versao ?? 0,
     },
+  }));
+}
+
+export async function excluirItemOrcamento(item: ItemOrcamento): Promise<void> {
+  await chamar(() => api.delete(`/api/itens-orcamento/${item.id}`, {
+    params: { usuarioSolicitanteId: backendUserId() },
   }));
 }
 

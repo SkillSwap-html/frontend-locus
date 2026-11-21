@@ -345,26 +345,28 @@ export async function streetViewMetadata(lat: number, lng: number): Promise<Stre
       params: { location: `${lat},${lng}` },
     }),
   );
-  const key = import.meta.env["VITE_GOOGLE_MAPS_API_KEY"] as string | undefined;
-  const usarEmbedApi = import.meta.env["VITE_GOOGLE_MAPS_EMBED_ENABLED"] === "true";
+  let imagemUrl: string | undefined;
+  if (resultado.status === "OK") {
+    try {
+      const imagem = await api.get<Blob>(`${BASE}/google/street-view/image`, {
+        params: { location: `${lat},${lng}`, width: 900, height: 520 },
+        responseType: "blob",
+      });
+      imagemUrl = URL.createObjectURL(imagem.data);
+    } catch {
+      // A imagem é opcional: o mapa panorâmico continua disponível mesmo
+      // quando a chave do Street View ainda não foi habilitada no backend.
+    }
+  }
   return {
     ...resultado,
-    ...(key && usarEmbedApi
-      ? {
-          embedUrl: `https://www.google.com/maps/embed/v1/streetview?key=${encodeURIComponent(key)}&location=${encodeURIComponent(`${lat},${lng}`)}&heading=0&pitch=0&fov=90`,
-        }
-      : {}),
-    ...(key && usarEmbedApi && resultado.status === "OK"
-      ? {
-          imagemUrl: `https://maps.googleapis.com/maps/api/streetview?size=640x360&location=${lat},${lng}&key=${encodeURIComponent(key)}`,
-        }
-      : {}),
+    ...(imagemUrl ? { imagemUrl } : {}),
     mapaUrl: `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`,
   };
 }
 
 // ---------- Catálogo de ofertas do Locus ----------
-function normalizarVoo(raw: unknown): OfertaVoo {
+function normalizarVoo(raw: unknown, passageirosPadrao = 1): OfertaVoo {
   const value = objeto(raw);
   const price = objeto(value.price);
   const itineraries = Array.isArray(value.itineraries) ? value.itineraries : [];
@@ -386,7 +388,8 @@ function normalizarVoo(raw: unknown): OfertaVoo {
     destino: texto(arrival.iataCode),
     ida: texto(departure.at),
     volta: texto(returnDeparture.at),
-    passageiros: 1,
+    passageiros: Math.max(1, numero(value.travelerCount) || passageirosPadrao),
+    ...(value.roundTrip === true ? { idaEVolta: true } : {}),
     classe: "Econômica",
     bagagem: "Consultar oferta",
     moeda: texto(price.currency) || "BRL",
@@ -400,7 +403,8 @@ function normalizarVoo(raw: unknown): OfertaVoo {
 
 export async function buscarVoos(params: Record<string, string | number>): Promise<OfertaVoo[]> {
   const raw = await chamar<Json>(() => api.get(`${BASE}/ofertas/voos`, { params }));
-  return (Array.isArray(raw.data) ? raw.data : []).map(normalizarVoo);
+  const passageiros = Math.max(1, Number(params.adults ?? 1));
+  return (Array.isArray(raw.data) ? raw.data : []).map((item) => normalizarVoo(item, passageiros));
 }
 
 export async function buscarLocalizacoes(keyword: string): Promise<{ iataCode: string; nome: string }[]> {
@@ -449,7 +453,9 @@ function normalizarHotel(raw: unknown): OfertaHotel {
     id: texto(offer.id) || texto(hotel.hotelId),
     hotel: texto(hotel.name) || "Hotel",
     quarto: "Consultar oferta",
-    hospedes: 1,
+    hospedes: Math.max(1, numero(offer.adults) || 1),
+    ...(numero(offer.roomQuantity) > 0 ? { quartos: numero(offer.roomQuantity) } : {}),
+    ...(numero(offer.nights) > 0 ? { noites: numero(offer.nights) } : {}),
     checkin: texto(offer.checkInDate),
     checkout: texto(offer.checkOutDate),
     regime: "Consultar oferta",
