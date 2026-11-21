@@ -14,7 +14,14 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use(async (config) => {
-  const token = await getIdToken();
+  let token: string | null = null;
+  try {
+    token = await getIdToken();
+  } catch {
+    // Let the request reach Spring Security so it returns a real 401. A
+    // Firebase token-refresh error must not become the misleading "sem
+    // conexão" message produced for requests that never received a response.
+  }
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });

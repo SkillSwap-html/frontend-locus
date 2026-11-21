@@ -82,7 +82,12 @@ export async function getIdToken(): Promise<string | null> {
   if (typeof window === "undefined") return null;
   if (!firebaseAtivo) return null;
   const { instance } = await fb();
-  return (await instance.currentUser?.getIdToken()) ?? null;
+  // The visual app can already be rendered while Firebase is still restoring
+  // the session. Waiting here prevents the first chat request from being sent
+  // without the bearer token and being reported as a network failure.
+  await instance.authStateReady();
+  const currentUser = instance.currentUser;
+  return currentUser ? await currentUser.getIdToken() : null;
 }
 
 export async function entrar(email: string, senha: string): Promise<Usuario> {

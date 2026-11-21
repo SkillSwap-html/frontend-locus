@@ -1302,6 +1302,27 @@ function AssistantView({
     const leitura = distancia <= 10 ? "perto" : distancia <= 30 ? "viável com deslocamento" : "longe; melhor separar em outro dia";
     return `${distancia.toFixed(1)} km ${hospedagemBase ? "da hospedagem" : "do primeiro ponto"} · ${leitura}`;
   }
+  function lugarDaRecomendacao(recomendacao: Recomendacao): Lugar | null {
+    const encontrado = recomendacao.placeId
+      ? lugares.find((item) => item.placeId === recomendacao.placeId)
+      : undefined;
+    if (encontrado) return encontrado;
+    if (recomendacao.placeId && Number.isFinite(recomendacao.lat) && Number.isFinite(recomendacao.lng)) {
+      return {
+        placeId: recomendacao.placeId,
+        nome: recomendacao.titulo,
+        endereco: recomendacao.endereco ?? "Localização consultada no Google Places",
+        categoria: recomendacao.categoriaLocal ?? "Ponto de interesse",
+        ...(recomendacao.avaliacao != null ? { avaliacao: recomendacao.avaliacao } : {}),
+        lat: recomendacao.lat!,
+        lng: recomendacao.lng!,
+        fonte: recomendacao.evidencia.fonte,
+        consultadoEm: recomendacao.evidencia.consultadoEm,
+        demonstrativo: false,
+      };
+    }
+    return null;
+  }
   function adicionarLugar(lugar: Lugar) {
     if (!streetViews[lugar.placeId]) {
       onToast("Confira o Street View antes de adicionar este lugar ao roteiro.");
@@ -1390,19 +1411,39 @@ function AssistantView({
                           {recomendacao.valor ? ` · ${brl(recomendacao.valor)}` : ""}
                         </small>
                       </div>
-                      <button type="button" className="recommendation-action"
-                        onClick={() => {
-                          const lugar = recomendacao.placeId
-                            ? lugares.find((item) => item.placeId === recomendacao.placeId)
-                            : undefined;
-                          if (lugar) void revisarLugar(lugar, recomendacao);
-                          else onToast("Este local não está mais disponível. Faça a busca novamente para consultar o Street View.");
-                        }}
-                      >
-                        <Eye size={15} /> Visualizar
-                      </button>
+                      {(() => {
+                        const lugar = lugarDaRecomendacao(recomendacao);
+                        return (
+                          <div className="recommendation-actions">
+                            {lugar ? (
+                              <>
+                                <button type="button" className="recommendation-action"
+                                  onClick={() => void revisarLugar(lugar, recomendacao)}>
+                                  <Eye size={15} /> Visualizar
+                                </button>
+                                <button type="button" className="recommendation-action recommendation-add"
+                                  onClick={() => adicionarRecomendacaoControlada(recomendacao)}>
+                                  <Plus size={15} /> Adicionar
+                                </button>
+                              </>
+                            ) : (
+                              <span className="recommendation-unavailable">Aguardando consulta do local</span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   ))}
+                  {mensagem.autor === "assistente" && mensagem.recomendacoes?.length ? (() => {
+                    const lugaresDaMensagem = mensagem.recomendacoes
+                      .map((recomendacao) => lugarDaRecomendacao(recomendacao))
+                      .filter((lugar): lugar is Lugar => Boolean(lugar));
+                    return lugaresDaMensagem.length ? (
+                      <div className="chat-map-preview">
+                        <MapPreview lugares={lugaresDaMensagem.slice(0, 6)} />
+                      </div>
+                    ) : null;
+                  })() : null}
                 </div>
               </div>
             ))}

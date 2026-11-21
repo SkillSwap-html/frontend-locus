@@ -1666,6 +1666,7 @@ h3 {
   display: flex;
   justify-content: space-between;
   gap: 10px;
+  align-items: flex-start;
 }
 .from-user .recommendation {
   border-color: rgba(255, 255, 255, 0.2);
@@ -1683,16 +1684,37 @@ h3 {
   opacity: 0.75;
 }
 .recommendation button {
-  width: 26px;
-  height: 26px;
+  min-height: 28px;
   background: #fffefa;
   color: var(--locus-deep);
-  border: 0;
+  border: 1px solid rgba(23, 63, 53, 0.16);
   border-radius: 7px;
-  display: flex;
+  padding: 5px 8px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   flex: 0 0 auto;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.recommendation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+.recommendation-action.recommendation-add {
+  background: #e8f1e7;
+  border-color: #cfdfcc;
+  color: #285844;
+}
+.recommendation-unavailable {
+  max-width: 110px;
+  font-size: 10px;
+  line-height: 1.35;
+  opacity: 0.7;
 }
 .chat-input {
   border-top: 1px solid var(--locus-line);
