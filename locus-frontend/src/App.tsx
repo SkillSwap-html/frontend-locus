@@ -733,7 +733,7 @@ function LoginPage({
           </p>
           <div className="story-points">
             <span>
-              <Check size={15} /> Gemini para decidir melhor
+              <Check size={15} /> Locus AI para decidir melhor
             </span>
             <span>
               <Check size={15} /> Roteiros por dia
