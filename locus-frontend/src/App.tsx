@@ -251,7 +251,9 @@ function App() {
   const [diaAssistente, setDiaAssistente] = useState<number | undefined>(undefined);
 
   useEffect(() => {
-    void usuarioAtual().then(setUsuario);
+    void usuarioAtual()
+      .then(setUsuario)
+      .catch((error) => setToast(normalizarErro(error).message));
   }, []);
   useEffect(() => {
     if (!usuario) return;

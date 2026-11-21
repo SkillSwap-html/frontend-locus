@@ -65,9 +65,13 @@ async function fb() {
 export async function usuarioAtual(): Promise<Usuario | null> {
   if (typeof window === "undefined") return null;
   if (!firebaseAtivo) return null;
-  const { instance } = await fb();
+  const { auth, instance } = await fb();
   await instance.authStateReady();
-  const u = instance.currentUser;
+  // Depois do signInWithRedirect, o resultado da conta escolhida fica
+  // disponível nesta chamada. Sem getRedirectResult, a aplicação podia
+  // voltar do Google e continuar mostrando a tela de login.
+  const resultadoRedirect = await auth.getRedirectResult(instance);
+  const u = resultadoRedirect?.user ?? instance.currentUser;
   return u
     ? {
         uid: u.uid,
