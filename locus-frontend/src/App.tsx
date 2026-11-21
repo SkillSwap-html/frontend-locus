@@ -232,6 +232,11 @@ function formatarTransporte(value: string): string {
 function rotuloCategoria(value: CategoriaOrcamento): string {
   return CATEGORIAS.find((item) => item.id === value)?.rotulo ?? value;
 }
+function estrelasAvaliacao(avaliacao?: number): string {
+  if (avaliacao == null || !Number.isFinite(avaliacao)) return "";
+  const preenchidas = Math.max(0, Math.min(5, Math.round(avaliacao)));
+  return `${"★".repeat(preenchidas)}${"☆".repeat(5 - preenchidas)} ${avaliacao.toFixed(1)}`;
+}
 
 function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
@@ -1894,9 +1899,13 @@ function AssistantView({
                     <div className="recommendation" key={recomendacao.id}>
                       <div>
                         <strong>{recomendacao.titulo}</strong>
+                        {recomendacao.avaliacao != null && (
+                          <span className="recommendation-rating" aria-label={`Avaliação ${recomendacao.avaliacao.toFixed(1)} de 5`}>
+                            {estrelasAvaliacao(recomendacao.avaliacao)}
+                          </span>
+                        )}
                         <span>{recomendacao.resumo}</span>
                         <small>
-                          {recomendacao.avaliacao ? `★ ${recomendacao.avaliacao.toFixed(1)} · ` : ""}
                           {recomendacao.categoriaLocal ? `${recomendacao.categoriaLocal} · ` : ""}
                           {recomendacao.dia ? `Dia ${recomendacao.dia} · ` : ""}
                           {recomendacao.distanciaKm != null ? `${recomendacao.distanciaKm.toFixed(1)} km da hospedagem · ` : ""}

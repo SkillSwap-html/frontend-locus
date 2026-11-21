@@ -215,6 +215,112 @@ function textoGemini(raw: unknown): string {
     .join("\n");
 }
 
+function decodificarStringJson(valor: string): string {
+  return valor
+    .replace(/\\u([0-9a-f]{4})/gi, (_match, codigo: string) => String.fromCharCode(parseInt(codigo, 16)))
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\r")
+    .replace(/\\t/g, "\t")
+    .replace(/\\(["\\/])/g, "$1");
+}
+
+function extrairStringCampo(conteudo: string, chave: string): string {
+  const inicioCampo = conteudo.indexOf(`"${chave}"`);
+  if (inicioCampo < 0) return "";
+  const doisPontos = conteudo.indexOf(":", inicioCampo);
+  const inicioAspas = conteudo.indexOf('"', doisPontos);
+  if (doisPontos < 0 || inicioAspas < 0) return "";
+  let valor = "";
+  let escapado = false;
+  for (let indice = inicioAspas + 1; indice < conteudo.length; indice += 1) {
+    const caractere = conteudo[indice]!;
+    if (escapado) {
+      valor += `\\${caractere}`;
+      escapado = false;
+    } else if (caractere === "\\") {
+      escapado = true;
+    } else if (caractere === '"') {
+      return decodificarStringJson(valor);
+    } else {
+      valor += caractere;
+    }
+  }
+  return decodificarStringJson(valor);
+}
+
+function extrairStringsArray(conteudo: string, chave: string): string[] {
+  const inicioCampo = conteudo.indexOf(`"${chave}"`);
+  const inicioLista = inicioCampo >= 0 ? conteudo.indexOf("[", inicioCampo) : -1;
+  if (inicioLista < 0) return [];
+  const valores: string[] = [];
+  let valor = "";
+  let dentroDeString = false;
+  let escapado = false;
+  for (let indice = inicioLista + 1; indice < conteudo.length; indice += 1) {
+    const caractere = conteudo[indice]!;
+    if (!dentroDeString) {
+      if (caractere === '"') {
+        dentroDeString = true;
+        valor = "";
+      } else if (caractere === "]") {
+        break;
+      }
+      continue;
+    }
+    if (escapado) {
+      valor += `\\${caractere}`;
+      escapado = false;
+    } else if (caractere === "\\") {
+      escapado = true;
+    } else if (caractere === '"') {
+      valores.push(decodificarStringJson(valor));
+      dentroDeString = false;
+    } else {
+      valor += caractere;
+    }
+  }
+  return valores.filter(Boolean);
+}
+
+function extrairObjetosArray(conteudo: string, chave: string): Json[] {
+  const inicioCampo = conteudo.indexOf(`"${chave}"`);
+  const inicioLista = inicioCampo >= 0 ? conteudo.indexOf("[", inicioCampo) : -1;
+  if (inicioLista < 0) return [];
+  const objetos: Json[] = [];
+  let profundidade = 0;
+  let inicioObjeto = -1;
+  let dentroDeString = false;
+  let escapado = false;
+  for (let indice = inicioLista + 1; indice < conteudo.length; indice += 1) {
+    const caractere = conteudo[indice]!;
+    if (dentroDeString) {
+      if (escapado) escapado = false;
+      else if (caractere === "\\") escapado = true;
+      else if (caractere === '"') dentroDeString = false;
+      continue;
+    }
+    if (caractere === '"') {
+      dentroDeString = true;
+    } else if (caractere === "{") {
+      if (profundidade === 0) inicioObjeto = indice;
+      profundidade += 1;
+    } else if (caractere === "}") {
+      profundidade -= 1;
+      if (profundidade === 0 && inicioObjeto >= 0) {
+        try {
+          objetos.push(objeto(JSON.parse(conteudo.slice(inicioObjeto, indice + 1))));
+        } catch {
+          // Recupera os objetos completos mesmo quando o último foi truncado.
+        }
+        inicioObjeto = -1;
+      }
+    } else if (caractere === "]" && profundidade === 0) {
+      break;
+    }
+  }
+  return objetos;
+}
+
 function jsonDaResposta(textoResposta: string): Json {
   const limpo = textoResposta
     .replace(/^```(?:json)?\s*/i, "")
@@ -229,10 +335,27 @@ function jsonDaResposta(textoResposta: string): Json {
       try {
         return objeto(JSON.parse(limpo.slice(inicio, fim + 1)));
       } catch {
-        return {};
+        // A saída pode ter sido cortada pelo limite de tokens. Abaixo
+        // recuperamos os campos já completos para o chat não exibir JSON.
       }
     }
-    return {};
+    const parcial: Json = {};
+    const resposta = extrairStringCampo(limpo, "resposta");
+    const etapa = extrairStringCampo(limpo, "etapa");
+    const consultas = extrairStringsArray(limpo, "consultas");
+    const recomendacoes = extrairObjetosArray(limpo, "recomendacoes");
+    if (resposta) parcial.resposta = resposta;
+    if (etapa) parcial.etapa = etapa;
+    if (consultas.length) parcial.consultas = consultas;
+    if (recomendacoes.length) parcial.recomendacoes = recomendacoes;
+    const categorias = ["passagem", "hospedagem", "visitas", "alimentacao", "transporteLocal", "extras"];
+    const orcamento: Json = {};
+    categorias.forEach((categoria) => {
+      const valor = new RegExp(`"${categoria}"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)`).exec(limpo)?.[1];
+      if (valor != null) orcamento[categoria] = Number(valor);
+    });
+    if (Object.keys(orcamento).length) parcial.orcamentoSugerido = orcamento;
+    return parcial;
   }
 }
 
@@ -255,7 +378,7 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
       },
       ...(texto(value.consulta) ? { consulta: texto(value.consulta) } : {}),
       ...(texto(value.placeId) ? { placeId: texto(value.placeId) } : {}),
-      ...(Number.isFinite(Number(value.avaliacao)) ? { avaliacao: Number(value.avaliacao) } : {}),
+      ...(Number.isFinite(Number(value.avaliacao ?? value.rating ?? value.nota)) ? { avaliacao: Number(value.avaliacao ?? value.rating ?? value.nota) } : {}),
       ...(texto(value.endereco) ? { endereco: texto(value.endereco) } : {}),
       ...(Number.isFinite(Number(value.lat)) ? { lat: Number(value.lat) } : {}),
       ...(Number.isFinite(Number(value.lng)) ? { lng: Number(value.lng) } : {}),
@@ -289,16 +412,24 @@ function normalizarOrcamentoSugerido(raw: unknown): MensagemAssistente["orcament
 }
 
 function interpretarAssistente(raw: unknown): Pick<MensagemAssistente, "texto" | "recomendacoes" | "orcamentoSugerido" | "consultas" | "etapa"> {
+  const respostaDireta = objeto(raw);
+  const possuiFormatoDireto = Boolean(
+    texto(respostaDireta.resposta)
+      || Array.isArray(respostaDireta.consultas)
+      || Array.isArray(respostaDireta.recomendacoes),
+  );
   const textoResposta = textoGemini(raw);
-  const objetoResposta = jsonDaResposta(textoResposta);
+  const objetoResposta = possuiFormatoDireto ? respostaDireta : jsonDaResposta(textoResposta);
   const consultas = Array.isArray(objetoResposta.consultas)
     ? objetoResposta.consultas.map(texto).filter(Boolean)
     : [];
   const etapa = texto(objetoResposta.etapa) as MensagemAssistente["etapa"];
   const recomendacoes = normalizarRecomendacoes(objetoResposta.recomendacoes);
   const orcamentoSugerido = normalizarOrcamentoSugerido(objetoResposta.orcamentoSugerido);
+  const respostaLegivel = texto(objetoResposta.resposta)
+    || (!textoResposta.trim().startsWith("{") ? textoResposta.trim() : "");
   return {
-    texto: texto(objetoResposta.resposta) || textoResposta || "Recebi uma resposta vazia. Tente reformular a pergunta.",
+    texto: respostaLegivel || "Entendi o pedido. Vou organizar as opções encontradas para você escolher.",
     ...(consultas.length ? { consultas } : {}),
     ...(recomendacoes?.length ? { recomendacoes } : {}),
     ...(orcamentoSugerido ? { orcamentoSugerido } : {}),
