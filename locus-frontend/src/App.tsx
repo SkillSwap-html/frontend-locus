@@ -1094,7 +1094,7 @@ function AssistantView({
   const [busca, setBusca] = useState("");
   const [lugares, setLugares] = useState<Lugar[]>([]);
   const [streetViews, setStreetViews] = useState<Record<string, StreetViewMeta>>({});
-  const [streetViewSelecionado, setStreetViewSelecionado] = useState<{ lugar: Lugar; meta: StreetViewMeta } | null>(null);
+  const [streetViewSelecionado, setStreetViewSelecionado] = useState<{ lugar: Lugar; meta: StreetViewMeta; recomendacao?: Recomendacao } | null>(null);
   const [preferencias, setPreferencias] = useState<Preferencias | null>(null);
   const [rota, setRota] = useState<Trecho[]>([]);
   const [enviando, setEnviando] = useState(false);
@@ -1126,12 +1126,26 @@ function AssistantView({
         modoOrcamento,
         limite,
         acumulado,
+        origem: viagem?.origem || preferencias?.origem,
         destino: viagem?.destino,
+        dataInicio: viagem?.dataInicio || preferencias?.dataInicio,
+        dataFim: viagem?.dataFim || preferencias?.dataFim,
+        transporte: viagem?.transporte || preferencias?.transporte,
+        interesses: preferencias?.interesses,
+        ritmo: preferencias?.ritmo,
+        hospedagem: preferencias?.hospedagem,
+        roteiro: viagem?.roteiro.map((item) => `dia ${item.dia}: ${item.titulo}`).join(" | "),
       });
-      setMensagens((atuais) => [...atuais, resposta]);
       const consultas = resposta.consultas?.length ? resposta.consultas : [pergunta];
-      const resultados = await Promise.all(consultas.slice(0, 3).map((consulta) => buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }))));
+      const destinoBusca = viagem?.destino || preferencias?.destino || "";
+      const resultados = await Promise.all(
+        consultas.slice(0, 3).map((consulta) =>
+          buscaTextual(destinoBusca ? `${consulta} em ${destinoBusca}` : consulta)
+            .catch(() => ({ lugares: [], fallback: false })),
+        ),
+      );
       const encontrados = resultados.flatMap((item) => item.lugares);
+      let respostaFinal = resposta;
       if (encontrados.length) {
         const unicos = [...new Map(encontrados.map((item) => [item.placeId, item])).values()];
         const organizados = ordenarLugares(unicos);
@@ -1143,7 +1157,32 @@ function AssistantView({
         } else {
           setRota([]);
         }
+        const diasDeViagem = viagem?.dataInicio && viagem?.dataFim
+          ? Math.max(1, Math.floor((new Date(`${viagem.dataFim}T12:00:00`).getTime() - new Date(`${viagem.dataInicio}T12:00:00`).getTime()) / 86400000) + 1)
+          : 1;
+        const recomendacoesReais: Recomendacao[] = organizados.slice(0, 6).map((lugar, index) => ({
+          id: `lugar-${lugar.placeId}`,
+          placeId: lugar.placeId,
+          tipo: "lugar",
+          titulo: lugar.nome,
+          resumo: `${lugar.categoria} · ${lugar.endereco || "localização consultada"}`,
+          justificativa: `Encontrado no Google Places para ${destinoBusca || "o destino informado"}; confira o Street View antes de adicionar.`,
+          evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
+          categoria: "visitas",
+          natureza: "observado",
+          dia: Math.min(diasDeViagem, Math.floor(index / 3) + 1),
+        }));
+        respostaFinal = {
+          ...resposta,
+          texto: `${resposta.texto} Encontrei locais reais no destino; confira o Street View ao lado para escolher.`,
+          recomendacoes: recomendacoesReais,
+        };
+      } else {
+        const respostaSemRecomendacoes = { ...resposta };
+        delete respostaSemRecomendacoes.recomendacoes;
+        respostaFinal = respostaSemRecomendacoes;
       }
+      setMensagens((atuais) => [...atuais, respostaFinal]);
     } catch (error) {
       onToast(normalizarErro(error).message);
     } finally {
@@ -1154,7 +1193,8 @@ function AssistantView({
     event.preventDefault();
     if (!busca.trim()) return;
     try {
-      const resultado = await buscaTextual(busca);
+      const destinoBusca = viagem?.destino || preferencias?.destino || "";
+      const resultado = await buscaTextual(destinoBusca ? `${busca} em ${destinoBusca}` : busca);
       const organizados = ordenarLugares(resultado.lugares);
       setLugares(organizados);
       if (organizados.length > 1) {
@@ -1168,12 +1208,12 @@ function AssistantView({
       onToast(normalizarErro(error).message);
     }
   }
-  async function revisarLugar(lugar: Lugar) {
+  async function revisarLugar(lugar: Lugar, recomendacao?: Recomendacao) {
     onToast(`Consultando o Street View de ${lugar.nome}...`);
     try {
       const resultado = await streetViewMetadata(lugar.lat, lugar.lng);
       setStreetViews((atual) => ({ ...atual, [lugar.placeId]: resultado }));
-      setStreetViewSelecionado({ lugar, meta: resultado });
+      setStreetViewSelecionado({ lugar, meta: resultado, ...(recomendacao ? { recomendacao } : {}) });
       onToast(
         resultado.status === "OK"
           ? `${lugar.nome} está pronto para você conferir no mapa e no Street View.`
@@ -1182,7 +1222,7 @@ function AssistantView({
     } catch (error) {
       const fallback: StreetViewMeta = { status: "FALLBACK", mapaUrl: `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lugar.lat},${lugar.lng}` };
       setStreetViews((atual) => ({ ...atual, [lugar.placeId]: fallback }));
-      setStreetViewSelecionado({ lugar, meta: fallback });
+      setStreetViewSelecionado({ lugar, meta: fallback, ...(recomendacao ? { recomendacao } : {}) });
       onToast("A visualização foi aberta no Google Maps. A imagem depende da disponibilidade do ponto.");
     }
   }
@@ -1262,10 +1302,16 @@ function AssistantView({
                       <div>
                         <strong>{recomendacao.titulo}</strong>
                         <span>{recomendacao.resumo}</span>
-                        <small>{recomendacao.justificativa} · {recomendacao.evidencia.fonte}{recomendacao.valor ? ` · ${brl(recomendacao.valor)}` : ""}</small>
+                        <small>{recomendacao.dia ? `Dia ${recomendacao.dia} · ` : ""}{recomendacao.justificativa} · {recomendacao.evidencia.fonte}{recomendacao.valor ? ` · ${brl(recomendacao.valor)}` : ""}</small>
                       </div>
                       <button
-                        onClick={() => adicionarRecomendacaoControlada(recomendacao)}
+                        onClick={() => {
+                          const lugar = recomendacao.placeId
+                            ? lugares.find((item) => item.placeId === recomendacao.placeId)
+                            : undefined;
+                          if (lugar) void revisarLugar(lugar, recomendacao);
+                          else adicionarRecomendacaoControlada(recomendacao);
+                        }}
                       >
                         <Plus size={15} />
                       </button>
@@ -1402,7 +1448,7 @@ function AssistantView({
             <h3>{streetViewSelecionado.lugar.nome}</h3>
             {streetViewSelecionado.meta.imagemUrl ? <img className="street-view-modal-image" src={streetViewSelecionado.meta.imagemUrl} alt={`Street View de ${streetViewSelecionado.lugar.nome}`} /> : <iframe className="street-view-frame" src={streetViewSelecionado.meta.mapaUrl} title={`Street View de ${streetViewSelecionado.lugar.nome}`} loading="lazy" />}
             <p>{streetViewSelecionado.lugar.endereco || "Local consultado no mapa"}</p>
-            <div className="offer-modal-actions"><a className="secondary-button" href={streetViewSelecionado.meta.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Maps</a><button className="primary-button" type="button" onClick={() => { onAdicionar({ id: `lugar-${streetViewSelecionado.lugar.placeId}`, tipo: "lugar", titulo: streetViewSelecionado.lugar.nome, resumo: `${streetViewSelecionado.lugar.categoria} · ${streetViewSelecionado.lugar.endereco}`, justificativa: "Lugar consultado no Google Places e conferido no Street View.", evidencia: { fonte: streetViewSelecionado.lugar.fonte, consultadoEm: streetViewSelecionado.lugar.consultadoEm } }); setStreetViewSelecionado(null); }}><Plus size={15} /> Adicionar ao roteiro</button></div>
+            <div className="offer-modal-actions"><a className="secondary-button" href={streetViewSelecionado.meta.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Maps</a><button className="primary-button" type="button" onClick={() => { onAdicionar({ id: `lugar-${streetViewSelecionado.lugar.placeId}`, placeId: streetViewSelecionado.lugar.placeId, tipo: "lugar", titulo: streetViewSelecionado.lugar.nome, resumo: `${streetViewSelecionado.lugar.categoria} · ${streetViewSelecionado.lugar.endereco}`, justificativa: "Lugar consultado no Google Places e conferido no Street View.", evidencia: { fonte: streetViewSelecionado.lugar.fonte, consultadoEm: streetViewSelecionado.lugar.consultadoEm }, ...(streetViewSelecionado.recomendacao?.dia ? { dia: streetViewSelecionado.recomendacao.dia } : {}) }); setStreetViewSelecionado(null); }}><Plus size={15} /> Adicionar ao roteiro</button></div>
           </div>
         </div>
       )}

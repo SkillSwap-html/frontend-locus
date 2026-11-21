@@ -171,6 +171,9 @@ export interface Recomendacao {
   justificativa: string;
   evidencia: { fonte: string; consultadoEm: string };
   consulta?: string;
+  placeId?: string;
+  dia?: number;
+  duracaoMinutos?: number;
   valor?: number;
   categoria?: CategoriaOrcamento;
   natureza?: NaturezaValor;

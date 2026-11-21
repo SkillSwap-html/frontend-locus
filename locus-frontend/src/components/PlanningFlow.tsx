@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { BedDouble, Check, ExternalLink, Plane, Search, Sparkles, X } from "lucide-react";
-import { buscarHoteis, buscarVoos } from "@/services/integracoes";
+import { buscarHoteis, buscarLocalizacoes, buscarVoos } from "@/services/integracoes";
 import type { CategoriaOrcamento, OfertaHotel, OfertaVoo, Recomendacao, Viagem } from "@/types";
 
 type Etapa = "passagem" | "hospedagem" | "roteiro";
@@ -24,17 +24,41 @@ function codigoIata(valor: string | undefined, fallback: string): string {
     .toLowerCase();
   const conhecidos: Record<string, string> = {
     "sao paulo": "GRU",
+    "sao paulo, sp": "GRU",
     salvador: "SSA",
+    "salvador, ba": "SSA",
     curacao: "CUR",
+    "willemstad, curacao": "CUR",
     lisboa: "LIS",
+    "lisboa, portugal": "LIS",
+    portugal: "LIS",
+    madeira: "FNC",
+    "ilha da madeira": "FNC",
+    "ilha da madeira, portugal": "FNC",
+    funchal: "FNC",
     recife: "REC",
     "rio de janeiro": "GIG",
     fortaleza: "FOR",
     natal: "NAT",
   };
   if (conhecidos[normalizado]) return conhecidos[normalizado];
-  const somenteLetras = normalizado.replace(/[^a-z]/g, "").slice(0, 3);
-  return somenteLetras.length === 3 ? somenteLetras.toUpperCase() : fallback;
+  if (normalizado.includes("madeira") || normalizado.includes("funchal")) return "FNC";
+  if (normalizado.includes("salvador")) return "SSA";
+  if (normalizado.includes("lisboa") || normalizado === "portugal") return "LIS";
+  if (normalizado.includes("curacao") || normalizado.includes("willemstad")) return "CUR";
+  if (/^[a-z]{3}$/.test(normalizado)) return normalizado.toUpperCase();
+  return fallback;
+}
+
+async function resolverCodigoIata(valor: string, fallback = ""): Promise<string> {
+  const direto = codigoIata(valor, "");
+  if (direto) return direto;
+  const resultados = await buscarLocalizacoes(valor);
+  return resultados[0]?.iataCode || fallback;
+}
+
+function valorInicialLocal(valor: string | undefined, fallback: string): string {
+  return codigoIata(valor, "") || valor || fallback;
 }
 
 function recomendacaoOferta(
@@ -74,11 +98,11 @@ export function PlanningFlow({
   onAdicionar: (recomendacao: Recomendacao) => void;
 }) {
   const [etapa, setEtapa] = useState<Etapa>(etapaInicial === "hospedagem" ? "hospedagem" : etapaInicial === "roteiro" ? "roteiro" : "passagem");
-  const [origem, setOrigem] = useState(codigoIata(viagem?.origem, "GRU"));
-  const [destino, setDestino] = useState(codigoIata(viagem?.destino, "CUR"));
+  const [origem, setOrigem] = useState(valorInicialLocal(viagem?.origem, "GRU"));
+  const [destino, setDestino] = useState(valorInicialLocal(viagem?.destino, ""));
   const [ida, setIda] = useState(viagem?.dataInicio || "");
   const [volta, setVolta] = useState(viagem?.dataFim || "");
-  const [cidade, setCidade] = useState(codigoIata(viagem?.destino, "CUR"));
+  const [cidade, setCidade] = useState(valorInicialLocal(viagem?.destino, ""));
   const [entrada, setEntrada] = useState(viagem?.dataInicio || "");
   const [saida, setSaida] = useState(viagem?.dataFim || "");
   const [voos, setVoos] = useState<OfertaVoo[]>([]);
@@ -91,7 +115,10 @@ export function PlanningFlow({
     if (!viagem || !cidade || !entrada || !saida) return;
     let ativo = true;
     setCarregando(true);
-    void buscarHoteis({ cityCode: cidade, checkInDate: entrada, checkOutDate: saida, adults: 1, roomQuantity: 1 })
+    void resolverCodigoIata(cidade)
+      .then((cityCode) => cityCode
+        ? buscarHoteis({ cityCode, checkInDate: entrada, checkOutDate: saida, adults: 1, roomQuantity: 1 })
+        : [])
       .then((resultado) => {
         if (ativo) setHoteis(resultado);
       })
@@ -145,7 +172,12 @@ export function PlanningFlow({
     }
     setCarregando(true);
     try {
-      const resultado = await buscarVoos({ originLocationCode: codigoIata(origem, "GRU"), destinationLocationCode: codigoIata(destino, "CUR"), departureDate: ida, ...(volta ? { returnDate: volta } : {}), adults: 1, max: 6 });
+      const [origemCode, destinoCode] = await Promise.all([resolverCodigoIata(origem), resolverCodigoIata(destino)]);
+      if (!origemCode || !destinoCode) {
+        onToast("Informe uma cidade ou código IATA reconhecido para origem e destino.");
+        return;
+      }
+      const resultado = await buscarVoos({ originLocationCode: origemCode, destinationLocationCode: destinoCode, departureDate: ida, ...(volta ? { returnDate: volta } : {}), adults: 1, max: 6 });
       setVoos(resultado);
       onToast(resultado.length ? "Passagens encontradas. Abra uma opção para conferir os detalhes." : "Nenhuma passagem encontrada para esses filtros.");
     } catch (error) {
@@ -163,7 +195,12 @@ export function PlanningFlow({
     }
     setCarregando(true);
     try {
-      const resultado = await buscarHoteis({ cityCode: codigoIata(cidade, "CUR"), checkInDate: entrada, checkOutDate: saida, adults: 1, roomQuantity: 1 });
+      const cityCode = await resolverCodigoIata(cidade);
+      if (!cityCode) {
+        onToast("Informe uma cidade ou código IATA reconhecido para buscar hospedagens.");
+        return;
+      }
+      const resultado = await buscarHoteis({ cityCode, checkInDate: entrada, checkOutDate: saida, adults: 1, roomQuantity: 1 });
       setHoteis(resultado);
       onToast(resultado.length ? "Hospedagens encontradas. Abra uma opção para ver a imagem." : "Nenhuma hospedagem encontrada para esses filtros.");
     } catch (error) {
@@ -179,7 +216,7 @@ export function PlanningFlow({
         <div>
           <span className="section-label">Planejamento guiado</span>
           <h3>Passagem, hospedagem e roteiro</h3>
-          <small className="planning-source">As opções marcadas como simuladas são fictícias para demonstração.</small>
+          <small className="planning-source">A fonte e a data da consulta aparecem em cada opção. Confirme disponibilidade antes de comprar.</small>
         </div>
         <Sparkles size={18} />
       </div>
@@ -258,5 +295,5 @@ export function PlanningFlow({
         </div>
       )}
     </div>
-  );
-}
+    );
+  }

@@ -92,6 +92,9 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
         consultadoEm: texto(evidencia.consultadoEm) || new Date().toISOString(),
       },
       ...(texto(value.consulta) ? { consulta: texto(value.consulta) } : {}),
+      ...(texto(value.placeId) ? { placeId: texto(value.placeId) } : {}),
+      ...(Number.isInteger(Number(value.dia)) ? { dia: Number(value.dia) } : {}),
+      ...(Number.isInteger(Number(value.duracaoMinutos)) ? { duracaoMinutos: Number(value.duracaoMinutos) } : {}),
       ...(Number.isFinite(Number(value.valor)) ? { valor: Number(value.valor) } : {}),
       ...(categoria ? { categoria } : {}),
       ...(natureza ? { natureza } : {}),
@@ -123,7 +126,15 @@ export async function perguntarGemini(
     modoOrcamento?: "fixo" | "aberto";
     limite?: number;
     acumulado?: number;
+    origem?: string;
     destino?: string;
+    dataInicio?: string;
+    dataFim?: string;
+    transporte?: string;
+    interesses?: string[];
+    ritmo?: string;
+    hospedagem?: string;
+    roteiro?: string;
   },
 ): Promise<MensagemAssistente> {
   const historicoTexto = historico
@@ -137,8 +148,20 @@ export async function perguntarGemini(
         ? "sem limite máximo."
         : `limite total R$ ${contexto.limite.toFixed(2)} e saldo restante R$ ${Math.max(0, contexto.limite - (contexto.acumulado ?? 0)).toFixed(2)}.`)
     : "";
-  const destino = contexto?.destino ? `Destino atual: ${contexto.destino}.` : "";
-  const prompt = [financeiro, destino, historicoTexto, `Usuário: ${textoPergunta}`]
+  const viagem = contexto
+    ? [
+        contexto.origem ? `Origem: ${contexto.origem}.` : "",
+        contexto.destino ? `Destino obrigatório desta viagem: ${contexto.destino}.` : "",
+        contexto.dataInicio && contexto.dataFim ? `Datas: ${contexto.dataInicio} até ${contexto.dataFim}.` : "",
+        contexto.transporte ? `Transporte escolhido: ${contexto.transporte}.` : "",
+        contexto.interesses?.length ? `Interesses: ${contexto.interesses.join(", ")}.` : "",
+        contexto.ritmo ? `Ritmo: ${contexto.ritmo}.` : "",
+        contexto.hospedagem ? `Hospedagem preferida: ${contexto.hospedagem}.` : "",
+        contexto.roteiro ? `Itens já adicionados ao roteiro: ${contexto.roteiro}.` : "",
+      ].filter(Boolean).join(" ")
+    : "";
+  const regras = "Não repita saudações nem perguntas já respondidas. Recomende somente locais dentro do destino obrigatório; para locais nomeados, gere consultas ao Google Places e deixe a confirmação dos dados para a busca real.";
+  const prompt = [financeiro, viagem, regras, historicoTexto, `Usuário: ${textoPergunta}`]
     .filter(Boolean)
     .join("\n\n");
   const raw = await chamar(() =>
@@ -298,6 +321,19 @@ export async function buscarVoos(params: Record<string, string | number>): Promi
   return (Array.isArray(raw.data) ? raw.data : []).map(normalizarVoo);
 }
 
+export async function buscarLocalizacoes(keyword: string): Promise<{ iataCode: string; nome: string }[]> {
+  const raw = await chamar<Json>(() => api.get(`${BASE}/ofertas/localizacoes`, { params: { keyword } }));
+  return (Array.isArray(raw.data) ? raw.data : [])
+    .map((item: Json) => {
+      const address = objeto(item.address);
+      return {
+        iataCode: texto(item.iataCode).toUpperCase(),
+        nome: texto(address.cityName) || texto(item.name?.cityName) || texto(item.name),
+      };
+    })
+    .filter((item: { iataCode: string; nome: string }) => /^[A-Z]{3}$/.test(item.iataCode));
+}
+
 export async function precificarVoo(oferta: OfertaVoo | Json): Promise<Json> {
   return chamar(() => api.post<Json>(`${BASE}/ofertas/voos/preco`, oferta));
 }
@@ -339,13 +375,17 @@ function normalizarHotel(raw: unknown): OfertaHotel {
     moeda: texto(price.currency) || "BRL",
     taxas: 0,
     preco: numero(price.total),
-    imagemUrl:
-      texto(hotel.imageUrl) ||
-      [
-        "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=900&q=80",
-        "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=900&q=80",
-        "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=900&q=80",
-      ][Math.abs(texto(hotel.hotelId).length) % 3],
+    ...(texto(hotel.imageUrl)
+      ? { imagemUrl: texto(hotel.imageUrl) }
+      : value.simulated === true
+        ? {
+            imagemUrl: [
+              "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=900&q=80",
+              "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=900&q=80",
+              "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=900&q=80",
+            ][Math.abs(texto(hotel.hotelId).length) % 3] ?? "",
+          }
+        : {}),
     latitude: numero(objeto(hotel.geoCode).latitude),
     longitude: numero(objeto(hotel.geoCode).longitude),
     fonte: value.simulated === true ? "Locus (simulado)" : "Provedor configurado",
