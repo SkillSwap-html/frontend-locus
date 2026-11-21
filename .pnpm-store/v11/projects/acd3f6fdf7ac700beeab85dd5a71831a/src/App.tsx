@@ -1145,9 +1145,16 @@ function AssistantView({
         ...(hospedagemBase ? { hospedagemBase: `${hospedagemBase.nome} (${hospedagemBase.lat}, ${hospedagemBase.lng})` } : {}),
         roteiro: viagem?.roteiro.map((item) => `dia ${item.dia}: ${item.titulo}`).join(" | "),
       });
-      setMensagens((atuais) => [...atuais, resposta]);
-      const consultas = resposta.consultas?.length ? resposta.consultas : [pergunta];
       const destinoBusca = viagem?.destino || preferencias?.destino || "";
+      const consultasDaIa = (resposta.consultas ?? [])
+        .map((consulta) => consulta.trim())
+        .filter((consulta) => consulta.length > 4)
+        .filter((consulta) => !/consultas?\s+(curtas|abaixo)|obter mais detalhes|google places$/i.test(consulta));
+      const pedeAtracoes = /ponto|turíst|praia|museu|restaurante|atraç|lugar|visita|roteiro/i.test(pergunta);
+      const consultaPadrao = destinoBusca
+        ? `${pedeAtracoes ? "pontos turísticos, praias, museus e atrações" : pergunta} em ${destinoBusca}`
+        : pergunta;
+      const consultas = [...new Set([...consultasDaIa, pergunta, consultaPadrao])].slice(0, 3);
       const contextoProximidade = hospedagemBase
         ? ` próximo à hospedagem ${hospedagemBase.nome}`
         : "";
@@ -1215,6 +1222,8 @@ function AssistantView({
           ...(recomendacoesReais.length ? { recomendacoes: recomendacoesReais } : {}),
         };
       } else {
+        setLugares([]);
+        setRota([]);
         respostaFinal = {
           ...resposta,
           texto: falhasBusca
@@ -1223,9 +1232,16 @@ function AssistantView({
         };
         delete respostaFinal.recomendacoes;
       }
-      setMensagens((atuais) => atuais.map((item) => item.id === resposta.id ? respostaFinal : item));
+      setMensagens((atuais) => [...atuais, respostaFinal]);
     } catch (error) {
-      onToast(normalizarErro(error).message);
+      const mensagemErro = normalizarErro(error).message;
+      onToast(mensagemErro);
+      setMensagens((atuais) => [...atuais, {
+        id: `erro-${Date.now()}`,
+        autor: "assistente",
+        texto: `${mensagemErro} Tente novamente ou informe um ponto turístico específico.`,
+        criadaEm: new Date().toISOString(),
+      }]);
     } finally {
       setEnviando(false);
     }
