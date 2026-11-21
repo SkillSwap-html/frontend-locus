@@ -175,11 +175,11 @@ export async function criarViagem(
 }
 
 export async function atualizarViagem(_id: string, _parcial: Partial<Viagem>): Promise<Viagem> {
-  throw new Error("O backend ainda não expõe atualização parcial da viagem.");
+  throw new Error("A atualização parcial da viagem ainda não está disponível.");
 }
 
 export async function salvarPreferencias(_p: Preferencias): Promise<void> {
-  throw new Error("As preferências devem ser persistidas pelos endpoints de perfil do backend.");
+  throw new Error("A gravação das preferências ainda não está disponível.");
 }
 
 export async function lerPreferencias(): Promise<Preferencias | null> {

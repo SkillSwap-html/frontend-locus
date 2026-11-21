@@ -30,7 +30,7 @@ export async function sincronizarUsuario(usuario: Usuario): Promise<number> {
         item.firebaseUid === usuario.uid ||
         item.email.toLowerCase() === usuario.email.toLowerCase(),
     );
-    if (!encontrado) throw new Error("Não foi possível vincular seu usuário ao backend.");
+    if (!encontrado) throw new Error("Não foi possível preparar seu perfil. Tente novamente.");
     localStorage.setItem(STORAGE_KEY, String(encontrado.id));
     return encontrado.id;
   }

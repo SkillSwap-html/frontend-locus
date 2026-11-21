@@ -1,4 +1,4 @@
-import type { ItemRoteiro, Viagem } from "@/types";
+import type { ItemRoteiro, Recomendacao, Viagem } from "@/types";
 import { api, chamar } from "./api";
 import { obterViagem } from "./viagens";
 import { backendUserId } from "./usuarioBackend";
@@ -8,7 +8,7 @@ export async function salvarRoteiro(_viagemId: string, _itens: ItemRoteiro[]): P
 }
 
 export async function criarVersao(viagemId: string): Promise<Viagem> {
-  return chamar(() =>
+  return chamar<Viagem>(() =>
     api.post<Viagem>(`/api/versoes-roteiro/viagem/${viagemId}`, undefined, {
       params: { usuarioSolicitanteId: backendUserId() },
     }),
@@ -58,9 +58,46 @@ export async function criarRoteiroInicial(viagem: Viagem): Promise<Viagem> {
   };
 }
 
+export async function adicionarRecomendacao(
+  viagemId: string,
+  recomendacao: Recomendacao,
+): Promise<Viagem> {
+  const usuarioId = backendUserId();
+  const dias = await chamar<Array<{ id: number }>>(() =>
+    api.get(`/api/dias-roteiro/viagem/${viagemId}`, { params: { usuarioId } }),
+  );
+  const dia = dias[0] ?? (await criarDia(viagemId));
+  await chamar(() =>
+    api.post(
+      `/api/itens-roteiro/dia/${dia.id}`,
+      {
+        titulo: recomendacao.titulo,
+        horarioInicio: "10:00",
+        duracaoMinutos: 90,
+        custoEstimado: 0,
+        observacoes: recomendacao.resumo,
+        motivoRecomendacao: recomendacao.justificativa,
+      },
+      { params: { usuarioId } },
+    ),
+  );
+  return obterViagem(viagemId);
+}
+
+async function criarDia(viagemId: string): Promise<{ id: number }> {
+  const viagem = await obterViagem(viagemId);
+  return chamar<{ id: number }>(() =>
+    api.post(
+      `/api/dias-roteiro/viagem/${viagemId}`,
+      { data: viagem.dataInicio },
+      { params: { usuarioId: backendUserId() } },
+    ),
+  );
+}
+
 export async function restaurarVersao(_viagemId: string, versaoId: string): Promise<Viagem> {
   throw new Error(
-    `O backend atual não expõe restauração da versão ${versaoId}; compare e recrie os itens desejados.`,
+    `A versão ${versaoId} não pode ser restaurada automaticamente; compare e recrie os itens desejados.`,
   );
 }
 

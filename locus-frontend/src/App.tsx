@@ -36,7 +36,7 @@ import {
 } from "@/services/integracoes";
 import { confirmarRoteiro } from "@/services/reservas";
 import { baixarRelatorio, listarRelatorios } from "@/services/relatorios";
-import { criarRoteiroInicial } from "@/services/roteiros";
+import { adicionarRecomendacao, criarRoteiroInicial } from "@/services/roteiros";
 import { sincronizarUsuario } from "@/services/usuarioBackend";
 import { criarViagem, listarViagens, obterViagem } from "@/services/viagens";
 import { MapPreview } from "@/components/MapPreview";
@@ -47,6 +47,7 @@ import type {
   Lugar,
   MensagemAssistente,
   ModoOrcamento,
+  Recomendacao,
   Relatorio,
   Transporte,
   Usuario,
@@ -120,17 +121,12 @@ function App() {
   const [selecionada, setSelecionada] = useState<Viagem | null>(null);
   const [relatorios, setRelatorios] = useState<Relatorio[]>([]);
   const [view, setView] = useState<View>("inicio");
-  const [backend, setBackend] = useState<"verificando" | "online" | "indisponivel">("verificando");
   const [mobileMenu, setMobileMenu] = useState(false);
   const [toast, setToast] = useState("");
   const [carregando, setCarregando] = useState(false);
 
   useEffect(() => {
     void usuarioAtual().then(setUsuario);
-    void api
-      .get("/api/teste")
-      .then(() => setBackend("online"))
-      .catch(() => setBackend("indisponivel"));
   }, []);
   useEffect(() => {
     if (!usuario) return;
@@ -210,6 +206,23 @@ function App() {
       setCarregando(false);
     }
   }
+  async function adicionarAoRoteiro(recomendacao: Recomendacao) {
+    if (!selecionada) {
+      setToast("Abra uma viagem para guardar essa sugestão no roteiro.");
+      return;
+    }
+    setCarregando(true);
+    try {
+      const atualizada = await adicionarRecomendacao(selecionada.id, recomendacao);
+      setSelecionada(atualizada);
+      setViagens((atuais) => atuais.map((item) => (item.id === atualizada.id ? atualizada : item)));
+      setToast(`${recomendacao.titulo} foi adicionado ao seu roteiro.`);
+    } catch (error) {
+      setToast(normalizarErro(error).message);
+    } finally {
+      setCarregando(false);
+    }
+  }
   function navegar(proxima: View) {
     setView(proxima);
     setMobileMenu(false);
@@ -218,7 +231,6 @@ function App() {
   if (!usuario)
     return (
       <LoginPage
-        backend={backend}
         carregando={carregando}
         mensagem={toast}
         onGoogle={() => void autenticarGoogle()}
@@ -236,10 +248,6 @@ function App() {
           >
             <X size={20} />
           </button>
-        </div>
-        <div className="sidebar-context">
-          <span className="status-dot" />
-          <span>{backend === "online" ? "Backend conectado" : "Backend indisponível"}</span>
         </div>
         <nav className="sidebar-nav" aria-label="Navegação principal">
           {menu.map((item) => {
@@ -319,7 +327,7 @@ function App() {
               viagens={viagens}
               selecionada={selecionada}
               usuario={usuario}
-              backend={backend}
+              relatorios={relatorios}
               onNova={() => navegar("nova")}
               onIA={() => navegar("ia")}
               onAbrir={abrirViagem}
@@ -361,6 +369,7 @@ function App() {
               viagem={selecionada}
               onVoltar={() => navegar(selecionada ? "viagem" : "inicio")}
               onToast={setToast}
+              onAdicionar={(recomendacao) => void adicionarAoRoteiro(recomendacao)}
             />
           )}
           {view === "perfil" && (
@@ -401,12 +410,10 @@ function App() {
 }
 
 function LoginPage({
-  backend,
   carregando,
   mensagem,
   onGoogle,
 }: {
-  backend: string;
   carregando: boolean;
   mensagem: string;
   onGoogle: () => void;
@@ -504,10 +511,6 @@ function LoginPage({
               {emailLoading ? "Entrando..." : "Entrar com e-mail"}
             </button>
           </form>
-          <p className="connection-note">
-            <span className={`status-dot ${backend === "online" ? "online" : ""}`} />{" "}
-            {backend === "online" ? "Backend conectado" : "Verificando conexão com o backend"}
-          </p>
         </div>
       </section>
     </main>
@@ -518,7 +521,7 @@ function HomeView({
   viagens,
   selecionada,
   usuario,
-  backend,
+  relatorios,
   onNova,
   onIA,
   onAbrir,
@@ -527,7 +530,7 @@ function HomeView({
   viagens: Viagem[];
   selecionada: Viagem | null;
   usuario: Usuario;
-  backend: string;
+  relatorios: Relatorio[];
   onNova: () => void;
   onIA: () => void;
   onAbrir: (viagem: Viagem) => void;
@@ -539,7 +542,11 @@ function HomeView({
       <div className="welcome-row">
         <div>
           <p className="eyebrow">
-            Terça-feira, {new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long" })}
+            {new Date().toLocaleDateString("pt-BR", {
+              weekday: "long",
+              day: "2-digit",
+              month: "long",
+            })}
           </p>
           <h1>
             Olá, {usuario.nome.split(" ")[0]}.<br />
@@ -558,8 +565,18 @@ function HomeView({
           value={String(viagens.length).padStart(2, "0")}
           tone="orange"
         />
-        <Metric icon={<Sparkles size={19} />} label="Ideias com a IA" value="12" tone="purple" />
-        <Metric icon={<FileText size={19} />} label="Relatórios salvos" value="04" tone="green" />
+        <Metric
+          icon={<Sparkles size={19} />}
+          label="Roteiros criados"
+          value={String(viagens.filter((item) => item.roteiro.length > 0).length).padStart(2, "0")}
+          tone="purple"
+        />
+        <Metric
+          icon={<FileText size={19} />}
+          label="Relatórios salvos"
+          value={String(relatorios.length).padStart(2, "0")}
+          tone="green"
+        />
       </div>
       <div className="home-grid">
         <div className="main-column">
@@ -656,8 +673,8 @@ function HomeView({
             <div className="timeline-note">
               <span className="timeline-line" />
               <div>
-                <strong>Backend {backend === "online" ? "conectado" : "em modo local"}</strong>
-                <p>Suas decisões ficam organizadas em um só lugar.</p>
+                <strong>Seu espaço está pronto</strong>
+                <p>Suas viagens, escolhas e entregas ficam organizadas aqui.</p>
               </div>
             </div>
             <div className="timeline-note">
@@ -959,10 +976,12 @@ function AssistantView({
   viagem,
   onVoltar,
   onToast,
+  onAdicionar,
 }: {
   viagem: Viagem | null;
   onVoltar: () => void;
   onToast: (value: string) => void;
+  onAdicionar: (recomendacao: Recomendacao) => void;
 }) {
   const [mensagens, setMensagens] = useState<MensagemAssistente[]>([
     {
@@ -1031,7 +1050,7 @@ function AssistantView({
           <ArrowRight className="rotate-180" size={16} /> Voltar
         </button>
         <span className="ai-live">
-          <span className="pulse-dot" /> Gemini com fallback Groq + Google Places
+          <span className="pulse-dot" /> Seu assistente de viagem
         </span>
       </div>
       <div className="assistant-heading">
@@ -1074,11 +1093,7 @@ function AssistantView({
                         <small>{recomendacao.justificativa}</small>
                       </div>
                       <button
-                        onClick={() =>
-                          onToast(
-                            `${recomendacao.titulo} foi separado para você revisar no roteiro.`,
-                          )
-                        }
+                        onClick={() => onAdicionar(recomendacao)}
                       >
                         <Plus size={15} />
                       </button>
