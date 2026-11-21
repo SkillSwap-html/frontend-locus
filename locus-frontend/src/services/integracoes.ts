@@ -116,8 +116,11 @@ function destinoParaExemplo(consulta: string): CoordenadaDestino {
 
   const trecho = consulta.match(/\bem\s+([^,.;]+(?:,[^.;]+)?)/i)?.[1]?.trim();
   return {
-    lat: -14.2350,
-    lng: -51.9253,
+    // Não existe uma coordenada correta para um destino desconhecido ou
+    // informado apenas como país. Usar o centro do Brasil aqui fazia locais
+    // de outros países aparecerem no mapa em uma posição errada.
+    lat: 0,
+    lng: 0,
     nome: trecho || "destino informado",
   };
 }
@@ -132,11 +135,14 @@ function lugaresDemonstrativos(consulta: string): Lugar[] {
   const categorias = querHospedagem
     ? ["Hotel", "Pousada", "Hotel", "Hostel"]
     : ["Praia", "Ponto turístico", "Restaurante", "Museu"];
+  const possuiCoordenadas = destino.lat !== 0 || destino.lng !== 0;
   const agora = new Date().toISOString();
   return nomes.map((nome, index) => ({
     placeId: `demo-${normalizarBusca(destino.nome).replace(/[^a-z0-9]+/g, "-")}-${index}`,
     nome: `${nome} em ${destino.nome}`,
-    endereco: `${destino.nome} · localização aproximada para planejamento`,
+    endereco: possuiCoordenadas
+      ? `${destino.nome} · localização de exemplo para planejamento`
+      : `${destino.nome} · confirme a localização no Google Maps`,
     categoria: categorias[index]!,
     lat: destino.lat + (index - 1.5) * 0.012,
     lng: destino.lng + (index % 2 === 0 ? 1 : -1) * (0.014 + index * 0.003),
@@ -385,11 +391,8 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
         consultadoEm: texto(evidencia.consultadoEm) || new Date().toISOString(),
       },
       ...(texto(value.consulta) ? { consulta: texto(value.consulta) } : {}),
-      ...(texto(value.placeId) ? { placeId: texto(value.placeId) } : {}),
       ...(Number.isFinite(Number(value.avaliacao ?? value.rating ?? value.nota)) ? { avaliacao: Number(value.avaliacao ?? value.rating ?? value.nota) } : {}),
       ...(texto(value.endereco) ? { endereco: texto(value.endereco) } : {}),
-      ...(Number.isFinite(Number(value.lat)) ? { lat: Number(value.lat) } : {}),
-      ...(Number.isFinite(Number(value.lng)) ? { lng: Number(value.lng) } : {}),
       ...(texto(value.categoriaLocal) ? { categoriaLocal: texto(value.categoriaLocal) } : {}),
       ...(Number.isInteger(Number(value.dia)) ? { dia: Number(value.dia) } : {}),
       ...(texto(value.horario) ? { horario: texto(value.horario) } : {}),
