@@ -2,8 +2,10 @@ import axios, { AxiosError } from "axios";
 import { getIdToken } from "./auth";
 
 /** Single Axios instance for the Spring Boot backend. */
+const backendPublicado = "https://backend-locus-production.up.railway.app";
+const backendConfigurado = (import.meta.env["VITE_API_URL"] as string | undefined)?.trim();
 export const API_URL = (
-  (import.meta.env["VITE_API_URL"] as string | undefined) || "http://localhost:8080"
+  backendConfigurado || (import.meta.env.PROD ? backendPublicado : "http://localhost:8080")
 ).replace(/\/$/, "");
 
 export const api = axios.create({
@@ -33,6 +35,7 @@ export class LocusError extends Error {
 type BackendError = {
   message?: string;
   mensagem?: string;
+  provedor?: string;
   campos?: Record<string, string>;
   erros?: Record<string, string>;
 };
@@ -51,6 +54,8 @@ export function normalizarErro(e: unknown): LocusError {
   const campos = payload?.erros ?? payload?.campos;
   if (status === 400 || status === 422)
     return new LocusError("validacao", mensagem ?? "Alguns dados precisam de ajuste.", campos);
+  if ((status === 401 || status === 403) && payload?.provedor)
+    return new LocusError("provedor", mensagem ?? `A integração com ${payload.provedor} não está autorizada.`);
   if (status === 401 || status === 403)
     return new LocusError("autenticacao", "Sua sessão expirou. Entre novamente.");
   if (status === 429)
