@@ -1565,13 +1565,16 @@ function AssistantView({
           : 1;
         const recomendacoesReais: Recomendacao[] = organizados.slice(0, 6).map((lugar, index) => {
           const estimativa = estimativaLocal(lugar);
+          const origemConsulta = placesEmFallback
+            ? "Opção de exemplo para manter o planejamento enquanto a cota do Google Places é recomposta."
+            : "Encontrado no Google Places; confira o Street View antes de adicionar.";
           return {
           id: `lugar-${lugar.placeId}`,
           placeId: lugar.placeId,
           tipo: "lugar",
           titulo: lugar.nome,
           resumo: `${lugar.categoria} · ${lugar.endereco || "localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""}${estimativa.valor > 0 ? ` · ${brl(estimativa.valor)} (${estimativa.rotulo})` : ` · ${estimativa.rotulo}`}`,
-          justificativa: `${hospedagemBase ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}. ` : ""}Encontrado no Google Places; confira o Street View antes de adicionar. O valor é uma estimativa e será somado somente se você adicionar o local.`,
+          justificativa: `${hospedagemBase ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}. ` : ""}${origemConsulta} Confira o Street View antes de adicionar. O valor é uma estimativa e será somado somente se você adicionar o local.`,
           evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
           categoria: estimativa.categoria,
           ...(estimativa.valor > 0 ? { valor: estimativa.valor } : {}),
@@ -1588,7 +1591,7 @@ function AssistantView({
         respostaFinal = {
           ...respostaComOrcamento,
           texto: organizados.length
-            ? `${resposta.texto} Encontrei ${organizados.length} locais reais${hospedagemBase ? ` em até 20 km da hospedagem ${hospedagemBase.nome}` : ""}. Veja a avaliação, abra o Street View e adicione somente os que desejar.`
+            ? `${resposta.texto} ${placesEmFallback ? `Encontrei ${organizados.length} opções de exemplo para ${destinoBusca || "o destino informado"} enquanto a consulta do Google Places é recomposta.` : `Encontrei ${organizados.length} locais reais${hospedagemBase ? ` em até 20 km da hospedagem ${hospedagemBase.nome}` : ""}.`} Veja a avaliação, abra o Street View e adicione somente os que desejar.`
             : `Não encontrei pontos turísticos dentro de 20 km da hospedagem ${hospedagemBase?.nome ?? "selecionada"}. Vou evitar sugerir locais distantes; pesquise um bairro ou local específico no campo ao lado.`,
           ...(recomendacoesReais.length ? { recomendacoes: recomendacoesReais } : {}),
         };
@@ -2073,7 +2076,7 @@ function AssistantView({
                             : "Sem imagem disponível para este ponto"}
                         </small>
                       </div>
-                      <GoogleStreetView lat={lugar.lat} lng={lugar.lng} className="street-view-inline-frame" />
+                      <GoogleStreetView lat={lugar.lat} lng={lugar.lng} imagemUrl={streetView.imagemUrl} className="street-view-inline-frame" />
                       {streetView.mapaUrl && <a href={streetView.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Street View</a>}
                     </div>
                   );
@@ -2107,7 +2110,7 @@ function AssistantView({
             <button className="offer-modal-close" type="button" onClick={() => setStreetViewSelecionado(null)} aria-label="Fechar"><X size={17} /></button>
             <span className="section-label">Antes de adicionar</span>
             <h3>{streetViewSelecionado.lugar.nome}</h3>
-            <GoogleStreetView lat={streetViewSelecionado.lugar.lat} lng={streetViewSelecionado.lugar.lng} />
+            <GoogleStreetView lat={streetViewSelecionado.lugar.lat} lng={streetViewSelecionado.lugar.lng} imagemUrl={streetViewSelecionado.meta.imagemUrl} />
             <p>{streetViewSelecionado.lugar.endereco || "Local consultado no mapa"}</p>
             <div className="street-view-details">
               <span>{streetViewSelecionado.lugar.categoria}</span>
@@ -2515,7 +2518,7 @@ function LocationField({
 
   useEffect(() => {
     const query = value.trim();
-    if (query.length < 2 || Boolean(codigoIataLocal(query))) {
+    if (query.length < 2) {
       setSuggestions([]);
       setOpen(false);
       return;
@@ -2576,20 +2579,6 @@ function LocationField({
       </div>
     </label>
   );
-}
-
-function codigoIataLocal(valor: string): string {
-  const normalizado = valor
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase();
-  if (/^[a-z]{3}$/.test(normalizado)) return normalizado.toUpperCase();
-  if (normalizado.includes("curacao") || normalizado.includes("willemstad")) return "CUR";
-  if (normalizado.includes("madeira") || normalizado.includes("funchal")) return "FNC";
-  if (normalizado.includes("salvador")) return "SSA";
-  if (normalizado.includes("lisboa") || normalizado === "portugal") return "LIS";
-  return "";
 }
 
 function SelectField({

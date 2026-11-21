@@ -85,7 +85,7 @@ function LocationSuggest({
 
   useEffect(() => {
     const query = value.trim();
-    if (query.length < 2 || Boolean(codigoIata(query, ""))) {
+    if (query.length < 2) {
       setSuggestions([]);
       setAberto(false);
       return;
@@ -210,9 +210,14 @@ export function PlanningFlow({
     let ativo = true;
     setCarregando(true);
     void resolverCodigoIata(cidade)
-      .then((cityCode) => cityCode
-        ? buscarHoteis({ cityCode, cityName: cidade, checkInDate: entrada, checkOutDate: saida, adults: pessoas, roomQuantity: quartos })
-        : [])
+      .then((cityCode) => buscarHoteis({
+        cityCode: cityCode || cidade,
+        cityName: cidade,
+        checkInDate: entrada,
+        checkOutDate: saida,
+        adults: pessoas,
+        roomQuantity: quartos,
+      }))
       .then((resultado) => {
         if (ativo) setHoteis(resultado);
       })
@@ -306,17 +311,24 @@ export function PlanningFlow({
     setCarregando(true);
     try {
       const cityCode = await resolverCodigoIata(cidade);
-      if (!cityCode) {
-        onToast("Informe uma cidade ou código IATA reconhecido para buscar hospedagens.");
-        return;
-      }
       if (saida <= entrada) {
         onToast("A saída precisa ser posterior à entrada para calcular as noites.");
         return;
       }
-      const resultado = await buscarHoteis({ cityCode, cityName: cidade, checkInDate: entrada, checkOutDate: saida, adults: pessoas, roomQuantity: quartos });
+      const resultado = await buscarHoteis({
+        cityCode: cityCode || cidade,
+        cityName: cidade,
+        checkInDate: entrada,
+        checkOutDate: saida,
+        adults: pessoas,
+        roomQuantity: quartos,
+      });
       setHoteis(resultado);
-      onToast(resultado.length ? "Hospedagens encontradas. Abra uma opção para ver a imagem." : "Nenhuma hospedagem encontrada para esses filtros.");
+      onToast(resultado.length
+        ? resultado.some((hotel) => hotel.fonte === "Exemplo de planejamento")
+          ? "A busca do Google está no limite. Mostrando exemplos calculados para o destino e as datas escolhidas."
+          : "Hospedagens encontradas. Abra uma opção para ver a imagem."
+        : "Nenhuma hospedagem encontrada para esses filtros.");
     } catch (error) {
       onToast(error instanceof Error ? error.message : "Não foi possível consultar as hospedagens.");
     } finally {

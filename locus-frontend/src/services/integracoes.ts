@@ -58,6 +58,147 @@ function normalizarLugar(raw: unknown): Lugar {
   return lugar;
 }
 
+type CoordenadaDestino = { lat: number; lng: number; nome: string };
+
+const DESTINOS_CONHECIDOS: Record<string, CoordenadaDestino> = {
+  curacao: { lat: 12.1696, lng: -68.9900, nome: "Curaçao" },
+  cur: { lat: 12.1696, lng: -68.9900, nome: "Curaçao" },
+  willemstad: { lat: 12.1090, lng: -68.9335, nome: "Willemstad" },
+  salvador: { lat: -12.9777, lng: -38.5016, nome: "Salvador" },
+  ssa: { lat: -12.9111, lng: -38.3313, nome: "Salvador" },
+  lisboa: { lat: 38.7223, lng: -9.1393, nome: "Lisboa" },
+  lis: { lat: 38.7742, lng: -9.1342, nome: "Lisboa" },
+  madeira: { lat: 32.7607, lng: -16.9595, nome: "Ilha da Madeira" },
+  funchal: { lat: 32.6669, lng: -16.9241, nome: "Funchal" },
+  fnc: { lat: 32.6979, lng: -16.7745, nome: "Ilha da Madeira" },
+  "rio de janeiro": { lat: -22.9068, lng: -43.1729, nome: "Rio de Janeiro" },
+  gig: { lat: -22.8099, lng: -43.2506, nome: "Rio de Janeiro" },
+  "sao paulo": { lat: -23.5505, lng: -46.6333, nome: "São Paulo" },
+  gru: { lat: -23.4356, lng: -46.4731, nome: "São Paulo" },
+  recife: { lat: -8.0476, lng: -34.8770, nome: "Recife" },
+  rec: { lat: -8.1268, lng: -34.9230, nome: "Recife" },
+  fortaleza: { lat: -3.7319, lng: -38.5267, nome: "Fortaleza" },
+  for: { lat: -3.7763, lng: -38.5326, nome: "Fortaleza" },
+  natal: { lat: -5.7945, lng: -35.2110, nome: "Natal" },
+  nat: { lat: -5.7681, lng: -35.3760, nome: "Natal" },
+};
+
+const SUGESTOES_LOCAIS = [
+  { id: "local-salvador", texto: "Salvador, Bahia, Brasil" },
+  { id: "local-curacao", texto: "Curaçao, Caribe" },
+  { id: "local-willemstad", texto: "Willemstad, Curaçao" },
+  { id: "local-lisboa", texto: "Lisboa, Portugal" },
+  { id: "local-madeira", texto: "Ilha da Madeira, Portugal" },
+  { id: "local-rio", texto: "Rio de Janeiro, Brasil" },
+  { id: "local-sao-paulo", texto: "São Paulo, Brasil" },
+  { id: "local-recife", texto: "Recife, Pernambuco, Brasil" },
+  { id: "local-fortaleza", texto: "Fortaleza, Ceará, Brasil" },
+  { id: "local-natal", texto: "Natal, Rio Grande do Norte, Brasil" },
+];
+
+function normalizarBusca(valor: string): string {
+  return valor
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase();
+}
+
+function destinoParaExemplo(consulta: string): CoordenadaDestino {
+  const normalizada = normalizarBusca(consulta);
+  const encontrado = Object.entries(DESTINOS_CONHECIDOS)
+    .filter(([chave]) => chave.length > 3)
+    .find(([chave]) => normalizada.includes(chave));
+  if (encontrado) return encontrado[1];
+  const codigo = normalizada.trim();
+  if (/^[a-z]{3}$/.test(codigo) && DESTINOS_CONHECIDOS[codigo]) return DESTINOS_CONHECIDOS[codigo];
+  const codigoNaConsulta = normalizada.match(/\b([a-z]{3})\b/)?.[1];
+  if (codigoNaConsulta && DESTINOS_CONHECIDOS[codigoNaConsulta]) return DESTINOS_CONHECIDOS[codigoNaConsulta];
+
+  const trecho = consulta.match(/\bem\s+([^,.;]+(?:,[^.;]+)?)/i)?.[1]?.trim();
+  return {
+    lat: -14.2350,
+    lng: -51.9253,
+    nome: trecho || "destino informado",
+  };
+}
+
+function lugaresDemonstrativos(consulta: string): Lugar[] {
+  const destino = destinoParaExemplo(consulta);
+  const textoConsulta = normalizarBusca(consulta);
+  const querHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/.test(textoConsulta);
+  const nomes = querHospedagem
+    ? ["Hospedagem central", "Pousada próxima à praia", "Hotel confortável no destino", "Hostel bem localizado"]
+    : ["Praia ou atração natural próxima", "Ponto turístico do centro", "Restaurante recomendado na região", "Museu ou atração cultural"];
+  const categorias = querHospedagem
+    ? ["Hotel", "Pousada", "Hotel", "Hostel"]
+    : ["Praia", "Ponto turístico", "Restaurante", "Museu"];
+  const agora = new Date().toISOString();
+  return nomes.map((nome, index) => ({
+    placeId: `demo-${normalizarBusca(destino.nome).replace(/[^a-z0-9]+/g, "-")}-${index}`,
+    nome: `${nome} em ${destino.nome}`,
+    endereco: `${destino.nome} · localização aproximada para planejamento`,
+    categoria: categorias[index]!,
+    lat: destino.lat + (index - 1.5) * 0.012,
+    lng: destino.lng + (index % 2 === 0 ? 1 : -1) * (0.014 + index * 0.003),
+    fonte: "Exemplo de planejamento · Google Places temporariamente limitado",
+    consultadoEm: agora,
+    demonstrativo: true,
+  }));
+}
+
+function sugestoesLocaisFallback(valor: string): { id: string; texto: string }[] {
+  const consulta = normalizarBusca(valor);
+  return SUGESTOES_LOCAIS
+    .filter((item) => normalizarBusca(item.texto).includes(consulta))
+    .slice(0, 6);
+}
+
+const IMAGENS_HOSPEDAGEM_EXEMPLO = [
+  "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=900&q=80",
+  "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=900&q=80",
+  "https://images.unsplash.com/photo-1564501049412-61c2a3083791?auto=format&fit=crop&w=900&q=80",
+];
+
+function hospedagensExemplo(params: Record<string, string | number>): OfertaHotel[] {
+  const cidade = texto(params["cityName"]) || texto(params["cityCode"]) || "destino informado";
+  const entrada = texto(params["checkInDate"]);
+  const saida = texto(params["checkOutDate"]);
+  const adultos = Math.max(1, numero(params["adults"], 1));
+  const quartos = Math.max(1, numero(params["roomQuantity"], 1));
+  const noites = entrada && saida
+    ? Math.max(1, Math.floor((new Date(`${saida}T12:00:00`).getTime() - new Date(`${entrada}T12:00:00`).getTime()) / 86400000))
+    : 1;
+  const destino = destinoParaExemplo(cidade);
+  const agora = new Date().toISOString();
+  const opcoes = [
+    ["Locus Central Hotel", 320],
+    ["Rota Verde Suites", 420],
+    ["Maré Alta Resort", 580],
+  ] as const;
+  return opcoes.map(([hotel, diaria], index) => ({
+    id: `hotel-exemplo-${normalizarBusca(cidade).replace(/[^a-z0-9]+/g, "-")}-${index}`,
+    hotel: `${hotel} · ${destino.nome}`,
+    quarto: `${adultos} hóspede(s) · ${quartos} quarto(s)`,
+    hospedes: adultos,
+    quartos,
+    noites,
+    checkin: entrada,
+    checkout: saida,
+    regime: "Exemplo com café da manhã",
+    politica: "Consulte disponibilidade antes de reservar",
+    moeda: "BRL",
+    taxas: 0,
+    preco: diaria * noites * quartos,
+    imagemUrl: IMAGENS_HOSPEDAGEM_EXEMPLO[index]!,
+    latitude: destino.lat + (index - 1) * 0.008,
+    longitude: destino.lng + (index - 1) * 0.009,
+    endereco: `${destino.nome} · endereço ilustrativo para planejamento`,
+    fonte: "Exemplo de planejamento",
+    consultadoEm: agora,
+    historico: [],
+  }));
+}
+
 function textoGemini(raw: unknown): string {
   const root = objeto(raw);
   const choices = Array.isArray(root.choices) ? root.choices : [];
@@ -315,19 +456,27 @@ export async function buscaTextual(q: string): Promise<ResultadoBusca> {
   const chave = chaveBusca(q);
   const cacheado = cacheBusca.get(chave);
   if (cacheado && cacheado.expiraEm > Date.now()) return cacheado.resultado;
-  if (placesIndisponivelAte > Date.now()) return { lugares: [], fallback: true };
+  if (placesIndisponivelAte > Date.now()) {
+    const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
+    cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
+    return resultado;
+  }
   try {
     const raw = await chamar<Json>(() =>
       api.post(`${BASE}/google/places/busca-textual`, { textQuery: q, languageCode: "pt-BR" }),
     );
     const places = Array.isArray(raw.places) ? raw.places : [];
-    const resultado = { lugares: places.map(normalizarLugar), fallback: false };
+    const resultado = places.length
+      ? { lugares: places.map(normalizarLugar), fallback: false }
+      : { lugares: lugaresDemonstrativos(q), fallback: true };
     cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   } catch (error) {
-    if (placesFoiLimitado(error)) {
+    if (placesFoiLimitado(error) || error instanceof LocusError) {
       placesIndisponivelAte = Date.now() + CACHE_PLACES_MS;
-      return { lugares: [], fallback: true };
+      const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
+      cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
+      return resultado;
     }
     throw error;
   }
@@ -338,13 +487,17 @@ export async function autocomplete(q: string): Promise<{ id: string; texto: stri
   const chave = chaveBusca(q);
   const cacheado = cacheAutocomplete.get(chave);
   if (cacheado && cacheado.expiraEm > Date.now()) return cacheado.resultado;
-  if (placesIndisponivelAte > Date.now()) return [];
+  if (placesIndisponivelAte > Date.now()) {
+    const resultado = sugestoesLocaisFallback(q);
+    cacheAutocomplete.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
+    return resultado;
+  }
   try {
     const raw = await chamar<Json>(() =>
       api.post(`${BASE}/google/places/autocomplete`, { input: q }),
     );
     const suggestions = Array.isArray(raw.suggestions) ? raw.suggestions : [];
-    const resultado = suggestions
+    const resultadoGoogle = suggestions
     .map((item: Json) => {
       const prediction = objeto(objeto(item).placePrediction);
       const description = objeto(prediction.text);
@@ -354,12 +507,15 @@ export async function autocomplete(q: string): Promise<{ id: string; texto: stri
       };
     })
     .filter((item: { id: string; texto: string }) => item.id || item.texto);
+    const resultado = resultadoGoogle.length ? resultadoGoogle : sugestoesLocaisFallback(q);
     cacheAutocomplete.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   } catch (error) {
-    if (placesFoiLimitado(error)) {
+    if (placesFoiLimitado(error) || error instanceof LocusError) {
       placesIndisponivelAte = Date.now() + CACHE_PLACES_MS;
-      return [];
+      const resultado = sugestoesLocaisFallback(q);
+      cacheAutocomplete.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
+      return resultado;
     }
     throw error;
   }
@@ -517,14 +673,16 @@ export async function buscarHoteis(
   const noites = entrada && saida
     ? Math.max(1, Math.floor((new Date(`${saida}T12:00:00`).getTime() - new Date(`${entrada}T12:00:00`).getTime()) / 86400000))
     : 0;
-  const raw = await chamar<Json>(() =>
-    api.post(`${BASE}/google/places/busca-textual`, {
-      textQuery: `hotéis e hospedagens reais em ${cidade}`,
-      languageCode: "pt-BR",
-    }),
-  );
-  const places = Array.isArray(raw.places) ? raw.places : [];
-  return Promise.all(places.slice(0, 8).map(async (place: Json, index: number) => {
+  try {
+    const raw = await chamar<Json>(() =>
+      api.post(`${BASE}/google/places/busca-textual`, {
+        textQuery: `hotéis e hospedagens reais em ${cidade}`,
+        languageCode: "pt-BR",
+      }),
+    );
+    const places = Array.isArray(raw.places) ? raw.places : [];
+    if (!places.length) return hospedagensExemplo(params);
+    return Promise.all(places.slice(0, 8).map(async (place: Json, index: number) => {
     const value = objeto(place);
     const displayName = objeto(value.displayName);
     const location = objeto(value.location);
@@ -566,5 +724,11 @@ export async function buscarHoteis(
       consultadoEm: new Date().toISOString(),
       historico: [],
     } satisfies OfertaHotel;
-  }));
+    }));
+  } catch {
+    // A consulta de tarifas não pode impedir o usuário de continuar o
+    // planejamento. Os exemplos abaixo são claramente identificados e
+    // calculados para o destino, datas, hóspedes e quartos informados.
+    return hospedagensExemplo(params);
+  }
 }
