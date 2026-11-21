@@ -3,6 +3,7 @@ export type ModoOrcamento = "fixo" | "aberto";
 export type CategoriaOrcamento =
   "passagem" | "hospedagem" | "visitas" | "alimentacao" | "transporteLocal" | "extras";
 export type NaturezaValor = "observado" | "historico" | "estimado" | "simulado";
+export type PrioridadeTransporte = "OBRIGATORIA" | "DESEJAVEL" | "INDIFERENTE";
 
 export interface Usuario {
   uid: string;
@@ -21,11 +22,13 @@ export interface Veiculo {
 }
 
 export interface Preferencias {
+  idade?: number;
   origem: string;
   destino: string;
   dataInicio: string;
   dataFim: string;
   transporte: Transporte;
+  prioridadeTransporte: PrioridadeTransporte;
   veiculo?: Veiculo;
   interesses: string[];
   mobilidade: "sem-restricao" | "reduzida" | "cadeira-de-rodas";
@@ -37,6 +40,9 @@ export interface Preferencias {
 
 export interface ItemRoteiro {
   id: string;
+  versao?: number;
+  diaRoteiroId?: number;
+  lugarId?: number;
   dia: number;
   titulo: string;
   inicio: string; // HH:mm
@@ -93,13 +99,22 @@ export interface Viagem {
   dataFim: string;
   transporte: Transporte;
   modoOrcamento: ModoOrcamento;
+  orcamentoTotal?: number;
   mochilao?: boolean;
   limites: Record<CategoriaOrcamento, number>;
   roteiro: ItemRoteiro[];
-  versoes: { id: string; criadaEm: string; itens: ItemRoteiro[] }[];
+  versoes: VersaoRoteiro[];
   orcamento: ItemOrcamento[];
   colaboradores: Colaborador[];
   tokenCompartilhamento: string;
+}
+
+export interface VersaoRoteiro {
+  id: string;
+  numero: number;
+  descricao?: string;
+  criadaEm: string;
+  itens?: ItemRoteiro[];
 }
 
 export interface Lugar {

@@ -26,29 +26,47 @@ export async function confirmarRoteiro(
   reserva: Reserva;
   relatorio: import("@/types").Relatorio;
 }> {
-  const criada = await chamar<Reserva>(() =>
+  const usuarioSolicitanteId = backendUserId();
+  const existentes = await listarReservas(viagemId).catch(() => []);
+  const ativa = [...existentes]
+    .reverse()
+    .find((item) => !String(item.status).toLowerCase().includes("cancelada"));
+  let reserva = ativa ?? await chamar<Reserva>(() =>
     api.post(`/api/reservas-simuladas/viagem/${viagemId}`, undefined, {
-      params: { usuarioSolicitanteId: backendUserId() },
+      params: { usuarioSolicitanteId },
     }),
   );
-  const preparada = await chamar<Reserva>(() =>
-    api.post(`/api/reservas-simuladas/${criada.id}/preparar-pagamento`, undefined, {
-      params: { usuarioSolicitanteId: backendUserId() },
-    }),
-  );
-  const pagamento = await chamar<{ id: number }>(() =>
-    api.post(`/api/pagamentos-simulados/reserva/${preparada.id}/iniciar`, undefined, {
-      params: { usuarioSolicitanteId: backendUserId() },
-    }),
-  );
-  await chamar(() =>
-    api.post(`/api/pagamentos-simulados/${pagamento.id}/concluir`, undefined, {
-      params: { usuarioSolicitanteId: backendUserId() },
-    }),
-  );
+  let status = String(reserva.status).toLowerCase();
+  if (status.includes("confirmada")) {
+    const { gerarRelatorio } = await import("./relatorios");
+    return { reserva, relatorio: await gerarRelatorio(reserva) };
+  }
+  if (status.includes("rascunho")) {
+    reserva = await chamar<Reserva>(() =>
+      api.post(`/api/reservas-simuladas/${reserva.id}/preparar-pagamento`, undefined, {
+        params: { usuarioSolicitanteId },
+      }),
+    );
+    status = String(reserva.status).toLowerCase();
+  }
+  if (status.includes("aguardando")) {
+    const pagamento = await chamar<{ id: number; status?: string }>(() =>
+      api.post(`/api/pagamentos-simulados/reserva/${reserva.id}/iniciar`, undefined, {
+        params: { usuarioSolicitanteId },
+      }),
+    );
+    status = String(pagamento.status).toLowerCase();
+    if (!status.includes("conclu")) {
+      await chamar(() =>
+        api.post(`/api/pagamentos-simulados/${pagamento.id}/concluir`, undefined, {
+          params: { usuarioSolicitanteId },
+        }),
+      );
+    }
+  }
   const confirmada = await chamar<Reserva>(() =>
-    api.post(`/api/reservas-simuladas/${preparada.id}/confirmar`, undefined, {
-      params: { usuarioSolicitanteId: backendUserId() },
+    api.post(`/api/reservas-simuladas/${reserva.id}/confirmar`, undefined, {
+      params: { usuarioSolicitanteId },
     }),
   );
   const { gerarRelatorio } = await import("./relatorios");

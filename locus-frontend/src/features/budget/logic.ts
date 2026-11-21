@@ -21,21 +21,24 @@ export function resumirOrcamento(
   itens: ItemOrcamento[],
   limites: Record<CategoriaOrcamento, number>,
   modo: ModoOrcamento,
+  limiteTotalOverride?: number,
 ) {
   const categorias: ResumoCategoria[] = CATEGORIAS.map(({ id }) => {
     const subtotal = itens.filter((i) => i.categoria === id).reduce((s, i) => s + i.valor, 0);
     const limite = limites[id] ?? 0;
-    const saldo = modo === "fixo" ? limite - subtotal : null;
+    const saldo = modo === "fixo" && limite > 0 ? limite - subtotal : null;
     return {
       categoria: id,
       subtotal,
       limite,
       saldo,
-      excesso: modo === "fixo" ? Math.max(0, subtotal - limite) : 0,
+      excesso: modo === "fixo" && limite > 0 ? Math.max(0, subtotal - limite) : 0,
     };
   });
   const total = categorias.reduce((s, c) => s + c.subtotal, 0);
-  const limiteTotal = categorias.reduce((s, c) => s + c.limite, 0);
+  const limiteTotal = modo === "fixo" && limiteTotalOverride != null
+    ? limiteTotalOverride
+    : categorias.reduce((s, c) => s + c.limite, 0);
   return {
     categorias,
     total,

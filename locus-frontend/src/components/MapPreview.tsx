@@ -6,7 +6,7 @@ export function MapPreview({ lugares }: { lugares: Lugar[] }) {
   const primeiro = pontos[0];
 
   if (!lugares.length) return null;
-  if (!key || !primeiro)
+  if (!primeiro)
     return (
       <div className="map-preview map-preview-empty">
         <strong>Confira os lugares no Google Maps</strong>
@@ -14,11 +14,14 @@ export function MapPreview({ lugares }: { lugares: Lugar[] }) {
       </div>
     );
 
+  const mapaSemChave = `https://www.google.com/maps?q=${encodeURIComponent(`${primeiro.lat},${primeiro.lng}`)}&output=embed`;
   return (
     <div className="map-preview" aria-label="Mapa dos lugares encontrados">
       <iframe
         className="map-preview-frame"
-        src={`https://www.google.com/maps/embed/v1/search?key=${encodeURIComponent(key)}&q=${encodeURIComponent(`${primeiro.nome}, ${primeiro.endereco || `${primeiro.lat},${primeiro.lng}`}`)}&zoom=12`}
+        src={key
+          ? `https://www.google.com/maps/embed/v1/search?key=${encodeURIComponent(key)}&q=${encodeURIComponent(`${primeiro.nome}, ${primeiro.endereco || `${primeiro.lat},${primeiro.lng}`}`)}&zoom=12`
+          : mapaSemChave}
         title="Mapa dos lugares encontrados"
         loading="lazy"
         allowFullScreen

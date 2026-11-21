@@ -20,11 +20,14 @@ import {
   MapPin,
   Menu,
   Navigation,
+  Pencil,
   Plus,
   Search,
   Settings2,
   ShieldCheck,
   Sparkles,
+  Share2,
+  Trash2,
   WalletCards,
   X,
 } from "lucide-react";
@@ -36,15 +39,16 @@ import {
   buscaTextual,
   calcularRota,
   perguntarGemini,
+  respostaLocalAssistente,
   streetViewMetadata,
   type StreetViewMeta,
   type Trecho,
 } from "@/services/integracoes";
 import { lerPreferenciasBackend } from "@/services/preferencias";
-import { confirmarRoteiro } from "@/services/reservas";
+import { cancelarSimulacao, confirmarRoteiro, listarReservas } from "@/services/reservas";
 import { baixarRelatorio, listarRelatorios } from "@/services/relatorios";
-import { adicionarRecomendacao, criarRoteiroInicial } from "@/services/roteiros";
-import { sincronizarUsuario } from "@/services/usuarioBackend";
+import { adicionarRecomendacao, compararVersoes, criarLinkCompartilhamento, criarRoteiroInicial, criarVersao, editarItemRoteiro, excluirItemRoteiro, restaurarVersao } from "@/services/roteiros";
+import { limparUsuarioBackend, sincronizarUsuario } from "@/services/usuarioBackend";
 import { criarViagem, listarNotificacoes, listarViagens, marcarLida, marcarTodasComoLidas, obterViagem } from "@/services/viagens";
 import { MapPreview } from "@/components/MapPreview";
 import { AdminView } from "@/components/AdminView";
@@ -202,7 +206,9 @@ function App() {
           setUsuario((atual) => (atual ? { ...atual, papel: "admin" } : atual));
         }
       } catch (error) {
+        limparUsuarioBackend();
         setToast(normalizarErro(error).message);
+        return;
       }
       try {
         const [lista, notificacoesAtuais] = await Promise.all([
@@ -242,6 +248,7 @@ function App() {
   }
   async function handleSair() {
     await sair();
+    limparUsuarioBackend();
     setUsuario(null);
     setViagens([]);
     setSelecionada(null);
@@ -295,6 +302,58 @@ function App() {
       setToast(normalizarErro(error).message);
     } finally {
       setCarregando(false);
+    }
+  }
+  async function removerDoRoteiro(item: ItemRoteiro) {
+    if (!selecionada) return;
+    setCarregando(true);
+    try {
+      await excluirItemRoteiro(item);
+      const atualizada = await obterViagem(selecionada.id);
+      setSelecionada(atualizada);
+      setViagens((atuais) => atuais.map((itemViagem) => itemViagem.id === atualizada.id ? atualizada : itemViagem));
+      setToast("Item removido do roteiro.");
+    } catch (error) {
+      setToast(normalizarErro(error).message);
+    } finally {
+      setCarregando(false);
+    }
+  }
+  async function editarNoRoteiro(item: ItemRoteiro) {
+    const titulo = window.prompt("Nome da atividade", item.titulo)?.trim();
+    if (!titulo) return;
+    const horarioInicio = window.prompt("Horário de início (HH:MM)", item.inicio)?.trim();
+    if (!horarioInicio || !/^([01]\d|2[0-3]):[0-5]\d$/.test(horarioInicio)) {
+      setToast("Informe o horário no formato HH:MM.");
+      return;
+    }
+    const duracaoTexto = window.prompt("Duração em minutos", String(item.duracaoMin));
+    const duracaoMinutos = Number(duracaoTexto);
+    if (!Number.isFinite(duracaoMinutos) || duracaoMinutos <= 0) {
+      setToast("Informe uma duração maior que zero.");
+      return;
+    }
+    setCarregando(true);
+    try {
+      await editarItemRoteiro(item, { titulo, horarioInicio, duracaoMinutos });
+      const atualizada = await obterViagem(selecionada!.id);
+      setSelecionada(atualizada);
+      setViagens((atuais) => atuais.map((itemViagem) => itemViagem.id === atualizada.id ? atualizada : itemViagem));
+      setToast("Atividade atualizada.");
+    } catch (error) {
+      setToast(normalizarErro(error).message);
+    } finally {
+      setCarregando(false);
+    }
+  }
+  async function compartilharViagem(viagem: Viagem) {
+    try {
+      const token = await criarLinkCompartilhamento(viagem.id);
+      const link = `${window.location.origin}/compartilhamento/${token}`;
+      await navigator.clipboard?.writeText(link);
+      setToast("Link de compartilhamento copiado.");
+    } catch (error) {
+      setToast(normalizarErro(error).message);
     }
   }
   function navegar(proxima: View) {
@@ -462,6 +521,14 @@ function App() {
               onVoltar={() => navegar("inicio")}
               onIA={() => navegar("ia")}
               onConfirmar={() => selecionada && void confirmar(selecionada)}
+              onRemoverItem={(item) => void removerDoRoteiro(item)}
+              onEditarItem={(item) => void editarNoRoteiro(item)}
+              onCompartilhar={() => selecionada && void compartilharViagem(selecionada)}
+              onAtualizar={(atualizada) => {
+                setSelecionada(atualizada);
+                setViagens((atuais) => atuais.map((item) => item.id === atualizada.id ? atualizada : item));
+              }}
+              onToast={setToast}
             />
           )}
           {view === "ia" && (
@@ -967,23 +1034,87 @@ function TripView({
   onVoltar,
   onIA,
   onConfirmar,
+  onRemoverItem,
+  onEditarItem,
+  onCompartilhar,
+  onAtualizar,
+  onToast,
   carregando,
 }: {
   viagem: Viagem | null;
   onVoltar: () => void;
   onIA: () => void;
   onConfirmar: () => void;
+  onRemoverItem: (item: ItemRoteiro) => void;
+  onEditarItem: (item: ItemRoteiro) => void;
+  onCompartilhar: () => void;
+  onAtualizar: (viagem: Viagem) => void;
+  onToast: (value: string) => void;
   carregando: boolean;
 }) {
   const [aba, setAba] = useState<"roteiro" | "orcamento" | "resumo">("roteiro");
+  const [reservaAtiva, setReservaAtiva] = useState<import("@/types").Reserva | null>(null);
+  const [cancelando, setCancelando] = useState(false);
+  const [versaoSelecionada, setVersaoSelecionada] = useState("");
+  const [comparacao, setComparacao] = useState<{ tipo: string; item: string; detalhe: string }[]>([]);
+  const [salvandoVersao, setSalvandoVersao] = useState(false);
+  useEffect(() => {
+    if (!viagem) {
+      setReservaAtiva(null);
+      return;
+    }
+    void listarReservas(viagem.id)
+      .then((reservas) => setReservaAtiva(
+        [...reservas].reverse().find((item) => !String(item.status).toLowerCase().includes("cancelada")) ?? null,
+      ))
+      .catch(() => setReservaAtiva(null));
+  }, [viagem?.id]);
   if (!viagem) return <EmptyTrip onNova={onVoltar} />;
-  const itens = viagem.roteiro ?? [];
+  const viagemAtual = viagem;
+  const itens = viagemAtual.roteiro ?? [];
   const dias = [...new Set(itens.map((item) => item.dia))];
   const resumo = resumirOrcamento(
-    itensParaResumo(viagem),
-    viagem.limites ?? LIMITES,
-    viagem.modoOrcamento ?? "aberto",
+    itensParaResumo(viagemAtual),
+    viagemAtual.limites ?? LIMITES,
+    viagemAtual.modoOrcamento ?? "aberto",
+    viagemAtual.orcamentoTotal,
   );
+  async function salvarVersao() {
+    setSalvandoVersao(true);
+    try {
+      await criarVersao(viagemAtual.id, `Versão ${new Date().toLocaleString("pt-BR")}`);
+      const atualizada = await obterViagem(viagemAtual.id);
+      onAtualizar(atualizada);
+      onToast("Versão do roteiro salva.");
+    } catch (error) {
+      onToast(normalizarErro(error).message);
+    } finally {
+      setSalvandoVersao(false);
+    }
+  }
+  async function comparar() {
+    const versoes = viagemAtual.versoes ?? [];
+    const maisRecente = versoes[0];
+    if (!maisRecente || !versaoSelecionada || maisRecente.id === versaoSelecionada) {
+      onToast("Salve pelo menos duas versões diferentes para comparar.");
+      return;
+    }
+    try {
+      setComparacao(await compararVersoes(versaoSelecionada, maisRecente.id));
+    } catch (error) {
+      onToast(normalizarErro(error).message);
+    }
+  }
+  async function restaurar() {
+    if (!versaoSelecionada || !window.confirm("Restaurar esta versão substituirá os itens atuais do roteiro. Continuar?")) return;
+    try {
+      onAtualizar(await restaurarVersao(viagemAtual.id, versaoSelecionada));
+      setComparacao([]);
+      onToast("Versão restaurada. Os itens atuais foram substituídos pela versão escolhida.");
+    } catch (error) {
+      onToast(normalizarErro(error).message);
+    }
+  }
   return (
     <section className="view-stack">
       <div className="back-row">
@@ -1004,9 +1135,26 @@ function TripView({
           </p>
         </div>
         <div className="heading-actions">
+          <button className="secondary-button" onClick={onCompartilhar}>
+            <Share2 size={16} /> Compartilhar
+          </button>
+          <button className="secondary-button" onClick={() => void salvarVersao()} disabled={salvandoVersao || itens.length === 0}>
+            {salvandoVersao ? "Salvando..." : "Salvar versão"}
+          </button>
           <button className="secondary-button" onClick={onIA}>
             <Sparkles size={17} /> Ajustar com IA
           </button>
+          {reservaAtiva && !String(reservaAtiva.status).toLowerCase().includes("confirmada") && <button
+            className="secondary-button"
+            disabled={cancelando}
+            onClick={() => {
+              if (!window.confirm("Cancelar esta simulação? O roteiro e as escolhas serão mantidos.")) return;
+              setCancelando(true);
+              void cancelarSimulacao(String(reservaAtiva.id))
+                .then(() => setReservaAtiva(null))
+                .finally(() => setCancelando(false));
+            }}
+          >{cancelando ? "Cancelando..." : "Cancelar simulação"}</button>}
           <button
             className="primary-button"
             onClick={onConfirmar}
@@ -1031,6 +1179,23 @@ function TripView({
           </button>
         ))}
       </div>
+      {(viagem.versoes?.length ?? 0) > 0 && (
+        <div className="version-panel surface-panel">
+          <div>
+            <span className="section-label">Histórico do roteiro</span>
+            <strong>Compare ou restaure uma versão salva</strong>
+          </div>
+          <div className="version-actions">
+            <select value={versaoSelecionada} onChange={(event) => setVersaoSelecionada(event.target.value)}>
+              <option value="">Escolha uma versão</option>
+              {viagem.versoes.map((versao) => <option key={versao.id} value={versao.id}>Versão {versao.numero} · {new Date(versao.criadaEm).toLocaleString("pt-BR")}</option>)}
+            </select>
+            <button className="secondary-button" type="button" onClick={() => void comparar()}>Comparar com a atual</button>
+            <button className="secondary-button" type="button" onClick={() => void restaurar()} disabled={!versaoSelecionada}>Restaurar</button>
+          </div>
+          {comparacao.length > 0 && <div className="version-differences">{comparacao.map((item, index) => <span key={`${item.tipo}-${item.item}-${index}`}><strong>{item.tipo}</strong> {item.item}: {item.detalhe}</span>)}</div>}
+        </div>
+      )}
       {aba === "roteiro" && (
         <div className="itinerary-layout">
           <div className="itinerary-main">
@@ -1048,7 +1213,7 @@ function TripView({
                     {itens
                       .filter((item) => item.dia === dia)
                       .map((item) => (
-                        <ItineraryItem key={item.id} item={item} />
+                          <ItineraryItem key={item.id} item={item} onRemover={() => onRemoverItem(item)} onEditar={() => onEditarItem(item)} />
                       ))}
                     <button className="add-item-button" onClick={onIA}>
                       <Plus size={16} /> Pedir uma sugestão para este dia
@@ -1110,7 +1275,7 @@ function AssistantView({
     void lerPreferenciasBackend().then(setPreferencias).catch(() => undefined);
   }, []);
   const modoOrcamento: ModoOrcamento = viagem?.modoOrcamento ?? preferencias?.modoOrcamento ?? "aberto";
-  const limiteViagem = viagem ? Object.values(viagem.limites).reduce((total, valor) => total + Number(valor || 0), 0) : 0;
+  const limiteViagem = viagem?.orcamentoTotal ?? (viagem ? Object.values(viagem.limites).reduce((total, valor) => total + Number(valor || 0), 0) : 0);
   const limitePreferencias = Number(preferencias?.limites.extras || 0);
   const limite = modoOrcamento === "fixo"
     ? (limiteViagem > 0 ? limiteViagem : limitePreferencias > 0 ? limitePreferencias : undefined)
@@ -1140,11 +1305,14 @@ function AssistantView({
         modoOrcamento,
         limite,
         acumulado,
+        idade: preferencias?.idade,
         origem: viagem?.origem || preferencias?.origem,
         destino: viagem?.destino,
         dataInicio: viagem?.dataInicio || preferencias?.dataInicio,
         dataFim: viagem?.dataFim || preferencias?.dataFim,
         transporte: viagem?.transporte || preferencias?.transporte,
+        prioridadeTransporte: preferencias?.prioridadeTransporte,
+        ...(preferencias?.veiculo ? { veiculo: `${preferencias.veiculo.modelo}, ${preferencias.veiculo.combustivel}, ${preferencias.veiculo.consumoKmL} km/L` } : {}),
         interesses: preferencias?.interesses,
         ritmo: preferencias?.ritmo,
         hospedagem: preferencias?.hospedagem,
@@ -1185,7 +1353,7 @@ function AssistantView({
       const encontrados = resultados.flatMap((item) => item.lugares);
       let respostaFinal = resposta;
       if (encontrados.length) {
-        const unicos = [...new Map(encontrados.map((item) => [item.placeId, item])).values()];
+        const unicos = [...new globalThis.Map(encontrados.map((item) => [item.placeId, item])).values()];
         const proximos = hospedagemBase
           ? unicos.filter((lugar) => distanciaKm(hospedagemBase, lugar) <= 20)
           : unicos;
@@ -1242,15 +1410,61 @@ function AssistantView({
         delete respostaFinal.recomendacoes;
       }
       setMensagens((atuais) => atuais.map((item) => item.id === idResposta ? { ...respostaFinal, id: idResposta } : item));
-    } catch (error) {
-      const mensagemErro = normalizarErro(error).message;
-      onToast(mensagemErro);
-      setMensagens((atuais) => atuais.map((item) => item.id === idResposta ? {
-        id: idResposta,
-        autor: "assistente",
-        texto: `${mensagemErro} Tente novamente ou informe um ponto turístico específico.`,
-        criadaEm: new Date().toISOString(),
-      } : item));
+    } catch {
+      // O chat continua útil mesmo quando o provedor de IA ou uma consulta
+      // secundária falha. A busca real do Google Places é independente da
+      // resposta textual e pode preencher os cartões dentro da conversa.
+      const destinoBusca = viagem?.destino || preferencias?.destino || "";
+      const fallback = respostaLocalAssistente(pergunta, {
+        modoOrcamento,
+        limite,
+        acumulado,
+        destino: destinoBusca,
+        origem: viagem?.origem || preferencias?.origem,
+        dataInicio: viagem?.dataInicio || preferencias?.dataInicio,
+        dataFim: viagem?.dataFim || preferencias?.dataFim,
+        interesses: preferencias?.interesses,
+        ritmo: preferencias?.ritmo,
+        hospedagem: preferencias?.hospedagem,
+        ...(hospedagemBase ? { hospedagemBase: hospedagemBase.nome } : {}),
+      });
+      try {
+        const resultado = await buscaTextual(destinoBusca ? `${pergunta} em ${destinoBusca}` : pergunta);
+        const locais = ordenarLugares(
+          hospedagemBase
+            ? resultado.lugares.filter((lugar) => distanciaKm(hospedagemBase, lugar) <= 20)
+            : resultado.lugares,
+          hospedagemBase ?? undefined,
+        ).slice(0, 6);
+        setLugares(locais);
+        const recomendacoes: Recomendacao[] = locais.map((lugar, index) => ({
+          id: `fallback-${lugar.placeId}`,
+          placeId: lugar.placeId,
+          tipo: "lugar",
+          titulo: lugar.nome,
+          resumo: `${lugar.categoria} · ${lugar.endereco || "Localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""}`,
+          justificativa: hospedagemBase
+            ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem. Confira no Street View antes de escolher.`
+            : "Resultado real consultado no Google Places. Confira no Street View antes de escolher.",
+          evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
+          categoria: "visitas",
+          natureza: "observado",
+          ...(lugar.avaliacao ? { avaliacao: lugar.avaliacao } : {}),
+          ...(lugar.endereco ? { endereco: lugar.endereco } : {}),
+          lat: lugar.lat,
+          lng: lugar.lng,
+          categoriaLocal: lugar.categoria,
+          ...(hospedagemBase ? { distanciaKm: distanciaKm(hospedagemBase, lugar) } : {}),
+          dia: Math.min(viagem?.dataInicio && viagem?.dataFim ? Math.max(1, Math.floor((new Date(`${viagem.dataFim}T12:00:00`).getTime() - new Date(`${viagem.dataInicio}T12:00:00`).getTime()) / 86400000) + 1) : 1, Math.floor(index / 3) + 1),
+        }));
+        if (recomendacoes.length) {
+          fallback.recomendacoes = recomendacoes;
+          fallback.texto = `${fallback.texto} Encontrei ${recomendacoes.length} locais reais no Google Places. Abra o Street View e escolha pelo próprio chat.`;
+        }
+      } catch {
+        // A mensagem local ainda é entregue mesmo sem o provedor externo.
+      }
+      setMensagens((atuais) => atuais.map((item) => item.id === idResposta ? { ...fallback, id: idResposta } : item));
     } finally {
       setEnviando(false);
     }
@@ -1836,7 +2050,7 @@ function Review({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-function ItineraryItem({ item }: { item: ItemRoteiro }) {
+function ItineraryItem({ item, onRemover, onEditar }: { item: ItemRoteiro; onRemover: () => void; onEditar: () => void }) {
   return (
     <div className="itinerary-item">
       <div className="item-time">{item.inicio}</div>
@@ -1851,6 +2065,8 @@ function ItineraryItem({ item }: { item: ItemRoteiro }) {
         <div className="item-tags">
           <span>{item.duracaoMin} min</span>
           {item.favorito && <Heart size={15} fill="currentColor" />}
+          <button className="icon-button" type="button" onClick={onEditar} aria-label={`Editar ${item.titulo}`}><Pencil size={14} /></button>
+          <button className="icon-button danger-icon" type="button" onClick={onRemover} aria-label={`Remover ${item.titulo} do roteiro`}><Trash2 size={14} /></button>
         </div>
       </div>
     </div>

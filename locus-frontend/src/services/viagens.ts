@@ -5,9 +5,11 @@ import type {
   ItemRoteiro,
   ItemOrcamento,
   CategoriaOrcamento,
+  VersaoRoteiro,
 } from "@/types";
 import { api, chamar } from "./api";
 import { backendUserId } from "./usuarioBackend";
+import { lerPreferenciasBackend, salvarPreferenciasBackend } from "./preferencias";
 
 const categorias: CategoriaOrcamento[] = [
   "passagem",
@@ -66,6 +68,9 @@ async function hidratar(raw: Record<string, unknown>): Promise<Viagem> {
     dataFim: String(raw["dataFim"] ?? ""),
     transporte: transporte(raw["modoTransporte"]),
     modoOrcamento: String(raw["tipoOrcamento"] ?? "").toUpperCase() === "FIXO" ? "fixo" : "aberto",
+    ...(Number(raw["valorOrcamentoTotal"] ?? 0) > 0
+      ? { orcamentoTotal: Number(raw["valorOrcamentoTotal"]) }
+      : {}),
     mochilao: Boolean(raw["mochilao"]),
     limites: limitesVazios(),
     roteiro: [],
@@ -75,7 +80,7 @@ async function hidratar(raw: Record<string, unknown>): Promise<Viagem> {
     tokenCompartilhamento: "",
   };
 
-  const [dias, orcamento, limites] = await Promise.all([
+  const [dias, orcamento, limites, versoes] = await Promise.all([
     chamar<Array<Record<string, unknown>>>(() =>
       api.get(`/api/dias-roteiro/viagem/${id}`, { params: { usuarioId: userId } }),
     ).catch(() => []),
@@ -84,6 +89,9 @@ async function hidratar(raw: Record<string, unknown>): Promise<Viagem> {
     ).catch(() => []),
     chamar<Array<Record<string, unknown>>>(() =>
       api.get(`/api/limites-orcamento/viagem/${id}`, { params: { usuarioSolicitanteId: userId } }),
+    ).catch(() => []),
+    chamar<Array<Record<string, unknown>>>(() =>
+      api.get(`/api/versoes-roteiro/viagem/${id}`, { params: { usuarioSolicitanteId: userId } }),
     ).catch(() => []),
   ]);
 
@@ -98,6 +106,9 @@ async function hidratar(raw: Record<string, unknown>): Promise<Viagem> {
   const roteiro: ItemRoteiro[] = itensPorDia.flatMap((itens, diaIndex) =>
     itens.map((item) => ({
       id: String(item["id"] ?? ""),
+      ...(item["versao"] != null ? { versao: Number(item["versao"]) } : {}),
+      ...(item["diaRoteiroId"] != null ? { diaRoteiroId: Number(item["diaRoteiroId"]) } : {}),
+      ...(item["lugarId"] != null ? { lugarId: Number(item["lugarId"]) } : {}),
       dia: diaIndex + 1,
       titulo: String(item["titulo"] ?? "Atividade"),
       inicio: String(item["horarioInicio"] ?? "09:00").slice(0, 5),
@@ -131,7 +142,13 @@ async function hidratar(raw: Record<string, unknown>): Promise<Viagem> {
     return acc;
   }, limitesVazios());
 
-  return { ...base, roteiro, orcamento: itensOrcamento, limites: limitesMap };
+  const versoesMap: VersaoRoteiro[] = versoes.map((versao) => ({
+    id: String(versao["id"] ?? ""),
+    numero: Number(versao["numeroVersao"] ?? 0),
+    ...(String(versao["descricao"] ?? "") ? { descricao: String(versao["descricao"]) } : {}),
+    criadaEm: String(versao["dataCriacao"] ?? ""),
+  }));
+  return { ...base, roteiro, orcamento: itensOrcamento, limites: limitesMap, versoes: versoesMap };
 }
 
 export async function listarViagens(): Promise<Viagem[]> {
@@ -189,6 +206,9 @@ export async function criarViagem(
           } as Record<string, string>
         )[dados.transporte],
         tipoOrcamento: dados.modoOrcamento === "fixo" ? "FIXO" : "ABERTO",
+        valorOrcamentoTotal: dados.modoOrcamento === "fixo"
+          ? Number(dados.limites.extras || 0)
+          : null,
         mochilao: Boolean(dados.mochilao),
       },
       { params: { usuarioSolicitanteId: backendUserId() } },
@@ -197,7 +217,7 @@ export async function criarViagem(
   if (dados.modoOrcamento === "fixo" && Number(dados.limites.extras || 0) > 0) {
     await chamar(() =>
       api.post(
-        `/api/limites-orcamento/viagem/${criada.id}`,
+        `/api/limites-orcamento/viagem/${criada["id"]}`,
         { categoria: "EXTRAS", valorLimite: Number(dados.limites.extras) },
         { params: { usuarioSolicitanteId: backendUserId() } },
       ),
@@ -207,15 +227,30 @@ export async function criarViagem(
 }
 
 export async function atualizarViagem(_id: string, _parcial: Partial<Viagem>): Promise<Viagem> {
-  throw new Error("A atualização parcial da viagem ainda não está disponível.");
+  const parcial = _parcial as Record<string, unknown>;
+  const raw = await chamar<Record<string, unknown>>(() => api.put(
+    `/api/viagens/${_id}`,
+    {
+      ...(typeof parcial["titulo"] === "string" ? { titulo: parcial["titulo"] } : {}),
+      ...(typeof parcial["origem"] === "string" ? { origem: parcial["origem"] } : {}),
+      ...(typeof parcial["destino"] === "string" ? { destino: parcial["destino"] } : {}),
+      ...(typeof parcial["dataInicio"] === "string" ? { dataInicio: parcial["dataInicio"] } : {}),
+      ...(typeof parcial["dataFim"] === "string" ? { dataFim: parcial["dataFim"] } : {}),
+      ...(typeof parcial["mochilao"] === "boolean" ? { mochilao: parcial["mochilao"] } : {}),
+      ...(parcial["orcamentoTotal"] != null ? { valorOrcamentoTotal: Number(parcial["orcamentoTotal"]) } : {}),
+      ...(typeof parcial["modoOrcamento"] === "string" ? { tipoOrcamento: parcial["modoOrcamento"] === "fixo" ? "FIXO" : "ABERTO" } : {}),
+    },
+    { params: { usuarioSolicitanteId: backendUserId() } },
+  ));
+  return hidratar(raw);
 }
 
-export async function salvarPreferencias(_p: Preferencias): Promise<void> {
-  throw new Error("A gravação das preferências ainda não está disponível.");
+export async function salvarPreferencias(preferencias: Preferencias): Promise<void> {
+  await salvarPreferenciasBackend(preferencias);
 }
 
 export async function lerPreferencias(): Promise<Preferencias | null> {
-  return null;
+  return lerPreferenciasBackend();
 }
 
 export async function listarNotificacoes(): Promise<Notificacao[]> {

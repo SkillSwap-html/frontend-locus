@@ -144,22 +144,25 @@ function interpretarAssistente(raw: unknown): Pick<MensagemAssistente, "texto" |
 }
 
 type ContextoAssistente = {
-  modoOrcamento?: "fixo" | "aberto";
-  limite?: number;
-  acumulado?: number;
-  origem?: string;
-  destino?: string;
-  dataInicio?: string;
-  dataFim?: string;
-  transporte?: string;
-  interesses?: string[];
-  ritmo?: string;
-  hospedagem?: string;
-  hospedagemBase?: string;
-  roteiro?: string;
+  modoOrcamento?: "fixo" | "aberto" | undefined;
+  limite?: number | undefined;
+  acumulado?: number | undefined;
+  idade?: number | undefined;
+  origem?: string | undefined;
+  destino?: string | undefined;
+  dataInicio?: string | undefined;
+  dataFim?: string | undefined;
+  transporte?: string | undefined;
+  prioridadeTransporte?: string | undefined;
+  veiculo?: string | undefined;
+  interesses?: string[] | undefined;
+  ritmo?: string | undefined;
+  hospedagem?: string | undefined;
+  hospedagemBase?: string | undefined;
+  roteiro?: string | undefined;
 };
 
-function respostaLocalAssistente(textoPergunta: string, contexto?: ContextoAssistente): MensagemAssistente {
+export function respostaLocalAssistente(textoPergunta: string, contexto?: ContextoAssistente): MensagemAssistente {
   const destino = contexto?.destino?.trim();
   const pergunta = textoPergunta.toLowerCase();
   const querHospedagem = /hotel|hospedagem|pousada|hostel|onde ficar/.test(pergunta);
@@ -211,7 +214,10 @@ export async function perguntarGemini(
         contexto.origem ? `Origem: ${contexto.origem}.` : "",
         contexto.destino ? `Destino obrigatório desta viagem: ${contexto.destino}.` : "",
         contexto.dataInicio && contexto.dataFim ? `Datas: ${contexto.dataInicio} até ${contexto.dataFim}.` : "",
+        contexto.idade ? `Idade do viajante principal: ${contexto.idade}.` : "",
         contexto.transporte ? `Transporte escolhido: ${contexto.transporte}.` : "",
+        contexto.prioridadeTransporte ? `Prioridade do transporte: ${contexto.prioridadeTransporte}.` : "",
+        contexto.veiculo ? `Veículo disponível: ${contexto.veiculo}.` : "",
         contexto.interesses?.length ? `Interesses: ${contexto.interesses.join(", ")}.` : "",
         contexto.ritmo ? `Ritmo: ${contexto.ritmo}.` : "",
         contexto.hospedagem ? `Hospedagem preferida: ${contexto.hospedagem}.` : "",
@@ -220,9 +226,12 @@ export async function perguntarGemini(
       ].filter(Boolean).join(" ")
     : "";
   const regras = "Não repita saudações nem perguntas já respondidas. Recomende somente locais dentro do destino obrigatório; para locais nomeados, gere consultas ao Google Places e deixe a confirmação dos dados para a busca real. Quando houver hospedagem-base, priorize locais em até 20 km dela e informe que o sistema vai conferir a distância e a rota.";
-  const prompt = [financeiro, viagem, regras, historicoTexto, `Usuário: ${textoPergunta}`]
+  const promptCompleto = [financeiro, viagem, regras, historicoTexto, `Usuário: ${textoPergunta}`]
     .filter(Boolean)
     .join("\n\n");
+  const prompt = promptCompleto.length > 11500
+    ? promptCompleto.slice(promptCompleto.length - 11500)
+    : promptCompleto;
   try {
     const raw = await chamar(() =>
       api.post<Json>(`${BASE}/gemini/conteudo`, { prompt }, { timeout: 30000 }),

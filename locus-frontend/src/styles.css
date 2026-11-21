@@ -1264,6 +1264,35 @@ h3 {
   border-bottom-color: var(--locus-coral);
   font-weight: 800;
 }
+.version-panel {
+  display: grid;
+  gap: 13px;
+  padding: 17px 20px;
+  border: 1px solid var(--locus-line);
+}
+.version-panel > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+.version-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  align-items: center;
+}
+.version-actions select {
+  min-width: 220px;
+  flex: 1;
+}
+.version-differences {
+  display: grid;
+  gap: 7px;
+  padding: 11px 13px;
+  border-radius: 12px;
+  background: #f6f0e8;
+  color: #7b8780;
+  font-size: 12px;
+}
 .itinerary-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(270px, 0.6fr);

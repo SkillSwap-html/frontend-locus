@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { BedDouble, Check, ExternalLink, Plane, Search, Sparkles, X } from "lucide-react";
-import { buscarHoteis, buscarLocalizacoes, buscarVoos } from "@/services/integracoes";
+import { BedDouble, Check, ExternalLink, MapPin, Plane, Search, Sparkles, X } from "lucide-react";
+import { autocomplete, buscarHoteis, buscarLocalizacoes, buscarVoos } from "@/services/integracoes";
 import type { CategoriaOrcamento, OfertaHotel, OfertaVoo, Recomendacao, Viagem } from "@/types";
 
 type Etapa = "passagem" | "hospedagem" | "roteiro";
@@ -55,6 +55,80 @@ async function resolverCodigoIata(valor: string, fallback = ""): Promise<string>
   if (direto) return direto;
   const resultados = await buscarLocalizacoes(valor);
   return resultados[0]?.iataCode || fallback;
+}
+
+function LocationSuggest({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  const [suggestions, setSuggestions] = useState<{ id: string; texto: string }[]>([]);
+  const [aberto, setAberto] = useState(false);
+
+  useEffect(() => {
+    const query = value.trim();
+    if (query.length < 2) {
+      setSuggestions([]);
+      setAberto(false);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void autocomplete(query)
+        .then((items) => {
+          setSuggestions(items);
+          setAberto(items.length > 0);
+        })
+        .catch(() => {
+          setSuggestions([]);
+          setAberto(false);
+        });
+    }, 280);
+    return () => window.clearTimeout(timer);
+  }, [value]);
+
+  return (
+    <label>
+      {label}
+      <div className="autocomplete-wrap">
+        <input
+          value={value}
+          onChange={(event) => {
+            onChange(event.target.value);
+            setAberto(true);
+          }}
+          onFocus={() => setAberto(suggestions.length > 0)}
+          onBlur={() => window.setTimeout(() => setAberto(false), 180)}
+          placeholder={placeholder}
+          autoComplete="off"
+        />
+        {aberto && suggestions.length > 0 && (
+          <div className="autocomplete-list" role="listbox">
+            {suggestions.map((item) => (
+              <button
+                key={item.id || item.texto}
+                type="button"
+                className="autocomplete-option"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onChange(item.texto);
+                  setSuggestions([]);
+                  setAberto(false);
+                }}
+              >
+                <MapPin size={14} /> <span>{item.texto}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </label>
+  );
 }
 
 function valorInicialLocal(valor: string | undefined, fallback: string): string {
@@ -242,8 +316,8 @@ export function PlanningFlow({
       {etapa === "passagem" && (
         <form className="planning-form" onSubmit={(event) => void pesquisarVoos(event)}>
           <div className="form-grid compact">
-            <label>Origem<input value={origem} onChange={(event) => setOrigem(event.target.value.toUpperCase())} placeholder="SSA ou Salvador" maxLength={30} /></label>
-            <label>Destino<input value={destino} onChange={(event) => setDestino(event.target.value.toUpperCase())} placeholder="CUR ou Curaçao" maxLength={30} /></label>
+            <LocationSuggest label="Origem" value={origem} onChange={setOrigem} placeholder="SSA ou Salvador" />
+            <LocationSuggest label="Destino" value={destino} onChange={setDestino} placeholder="CUR ou Curaçao" />
           </div>
           <div className="form-grid compact">
             <label>Ida<input type="date" value={ida} onChange={(event) => setIda(event.target.value)} /></label>
@@ -262,7 +336,7 @@ export function PlanningFlow({
       )}
       {etapa === "hospedagem" && (
         <form className="planning-form" onSubmit={(event) => void pesquisarHoteis(event)}>
-          <label>Destino<input value={cidade} onChange={(event) => setCidade(event.target.value.toUpperCase())} placeholder="CUR ou Curaçao" maxLength={30} /></label>
+          <LocationSuggest label="Destino" value={cidade} onChange={setCidade} placeholder="CUR ou Curaçao" />
           <div className="form-grid compact">
             <label>Entrada<input type="date" value={entrada} onChange={(event) => setEntrada(event.target.value)} /></label>
             <label>Saída<input type="date" value={saida} onChange={(event) => setSaida(event.target.value)} /></label>

@@ -1,4 +1,4 @@
-import type { CategoriaOrcamento, ItemRoteiro, Recomendacao, Viagem } from "@/types";
+import type { CategoriaOrcamento, ItemRoteiro, Recomendacao, VersaoRoteiro, Viagem } from "@/types";
 import { api, chamar } from "./api";
 import { obterViagem } from "./viagens";
 import { backendUserId } from "./usuarioBackend";
@@ -18,12 +18,26 @@ export async function salvarRoteiro(_viagemId: string, _itens: ItemRoteiro[]): P
   throw new Error("Use os endpoints de dias e itens de roteiro para persistir as atividades.");
 }
 
-export async function criarVersao(viagemId: string): Promise<Viagem> {
-  return chamar<Viagem>(() =>
-    api.post<Viagem>(`/api/versoes-roteiro/viagem/${viagemId}`, undefined, {
+export async function criarVersao(viagemId: string, descricao = "Versão salva pelo viajante"): Promise<VersaoRoteiro> {
+  return chamar<VersaoRoteiro>(() =>
+    api.post<VersaoRoteiro>(`/api/versoes-roteiro/viagem/${viagemId}`, undefined, {
+      params: { usuarioSolicitanteId: backendUserId(), descricao },
+    }),
+  );
+}
+
+export async function listarVersoes(viagemId: string): Promise<VersaoRoteiro[]> {
+  return chamar<VersaoRoteiro[]>(() =>
+    api.get<VersaoRoteiro[]>(`/api/versoes-roteiro/viagem/${viagemId}`, {
       params: { usuarioSolicitanteId: backendUserId() },
     }),
   );
+}
+
+export async function compararVersoes(versaoAntigaId: string, versaoNovaId: string): Promise<{ tipo: string; item: string; detalhe: string }[]> {
+  return chamar(() => api.get(`/api/versoes-roteiro/comparar`, {
+    params: { versaoAntigaId, versaoNovaId, usuarioSolicitanteId: backendUserId() },
+  }));
 }
 
 export async function criarRoteiroInicial(viagem: Viagem): Promise<Viagem> {
@@ -104,6 +118,41 @@ export async function adicionarRecomendacao(
   return obterViagem(viagemId);
 }
 
+export async function excluirItemRoteiro(item: ItemRoteiro): Promise<void> {
+  await chamar(() => api.delete(`/api/itens-roteiro/${item.id}`, {
+    params: {
+      usuarioId: backendUserId(),
+      versaoEsperada: item.versao ?? 0,
+    },
+  }));
+}
+
+export async function editarItemRoteiro(item: ItemRoteiro, dados: { titulo: string; horarioInicio: string; duracaoMinutos: number }): Promise<void> {
+  await chamar(() => api.put(`/api/itens-roteiro/${item.id}`, {
+    titulo: dados.titulo,
+    horarioInicio: dados.horarioInicio,
+    duracaoMinutos: dados.duracaoMinutos,
+    custoEstimado: item.valorEstimado ?? 0,
+    ...(item.observacoes ? { observacoes: item.observacoes } : {}),
+    ...(item.motivo ? { motivoRecomendacao: item.motivo } : {}),
+  }, {
+    params: {
+      usuarioId: backendUserId(),
+      versaoEsperada: item.versao ?? 0,
+      ...(item.lugarId != null ? { lugarId: item.lugarId } : {}),
+    },
+  }));
+}
+
+export async function criarLinkCompartilhamento(viagemId: string): Promise<string> {
+  const resposta = await chamar<{ token: string }>(() => api.post(
+    `/api/links-compartilhamento/viagem/${viagemId}`,
+    undefined,
+    { params: { usuarioSolicitanteId: backendUserId() } },
+  ));
+  return resposta.token;
+}
+
 async function criarDia(viagemId: string): Promise<{ id: number }> {
   const viagem = await obterViagem(viagemId);
   return chamar<{ id: number }>(() =>
@@ -115,10 +164,13 @@ async function criarDia(viagemId: string): Promise<{ id: number }> {
   );
 }
 
-export async function restaurarVersao(_viagemId: string, versaoId: string): Promise<Viagem> {
-  throw new Error(
-    `A versão ${versaoId} não pode ser restaurada automaticamente; compare e recrie os itens desejados.`,
-  );
+export async function restaurarVersao(viagemId: string, versaoId: string): Promise<Viagem> {
+  await chamar(() => api.post(
+    `/api/versoes-roteiro/${versaoId}/restaurar`,
+    undefined,
+    { params: { viagemId, usuarioSolicitanteId: backendUserId() } },
+  ));
+  return obterViagem(viagemId);
 }
 
 export { obterViagem };

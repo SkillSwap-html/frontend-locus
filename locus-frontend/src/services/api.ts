@@ -70,7 +70,7 @@ export function normalizarErro(e: unknown): LocusError {
   if (status === 502 || status === 503)
     return new LocusError("provedor", mensagem ?? "O provedor externo não respondeu.");
   if (status === 504) return new LocusError("timeout", "O provedor demorou para responder.");
-  if (!err?.response) return new LocusError("rede", "Sem conexão com o servidor do Locus.");
+  if (!err?.response) return new LocusError("rede", "Não consegui concluir esta consulta agora. Tente novamente em instantes.");
   return new LocusError("desconhecido", mensagem ?? "Algo deu errado.");
 }
 
