@@ -53,8 +53,20 @@ function codigoIata(valor: string | undefined, fallback: string): string {
 async function resolverCodigoIata(valor: string, fallback = ""): Promise<string> {
   const direto = codigoIata(valor, "");
   if (direto) return direto;
-  const resultados = await buscarLocalizacoes(valor);
-  return resultados[0]?.iataCode || fallback;
+  const resultados = await buscarLocalizacoes(valor).catch(() => []);
+  if (resultados[0]?.iataCode) return resultados[0].iataCode;
+
+  // O catálogo de ofertas do Locus é demonstrativo e também precisa aceitar
+  // países/cidades que ainda não possuem um apelido IATA cadastrado. O código
+  // abaixo só identifica a consulta simulada; não é apresentado como aeroporto
+  // real nem é enviado a um provedor comercial.
+  const simulado = valor
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "")
+    .slice(0, 3);
+  return simulado.length === 3 ? simulado : fallback;
 }
 
 function LocationSuggest({
@@ -73,7 +85,7 @@ function LocationSuggest({
 
   useEffect(() => {
     const query = value.trim();
-    if (query.length < 2) {
+    if (query.length < 2 || Boolean(codigoIata(query, ""))) {
       setSuggestions([]);
       setAberto(false);
       return;

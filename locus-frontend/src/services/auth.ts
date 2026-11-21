@@ -78,7 +78,7 @@ export async function usuarioAtual(): Promise<Usuario | null> {
     : null;
 }
 
-export async function getIdToken(): Promise<string | null> {
+export async function getIdToken(forceRefresh = false): Promise<string | null> {
   if (typeof window === "undefined") return null;
   if (!firebaseAtivo) return null;
   const { instance } = await fb();
@@ -87,7 +87,7 @@ export async function getIdToken(): Promise<string | null> {
   // without the bearer token and being reported as a network failure.
   await instance.authStateReady();
   const currentUser = instance.currentUser;
-  return currentUser ? await currentUser.getIdToken() : null;
+  return currentUser ? await currentUser.getIdToken(forceRefresh) : null;
 }
 
 export async function entrar(email: string, senha: string): Promise<Usuario> {

@@ -15,11 +15,12 @@ export function MapPreview({ lugares }: { lugares: Lugar[] }) {
     );
 
   const mapaSemChave = `https://www.google.com/maps?q=${encodeURIComponent(`${primeiro.lat},${primeiro.lng}`)}&output=embed`;
+  const usarEmbedApi = import.meta.env["VITE_GOOGLE_MAPS_EMBED_ENABLED"] === "true";
   return (
     <div className="map-preview" aria-label="Mapa dos lugares encontrados">
       <iframe
         className="map-preview-frame"
-        src={key
+        src={key && usarEmbedApi
           ? `https://www.google.com/maps/embed/v1/search?key=${encodeURIComponent(key)}&q=${encodeURIComponent(`${primeiro.nome}, ${primeiro.endereco || `${primeiro.lat},${primeiro.lng}`}`)}&zoom=12`
           : mapaSemChave}
         title="Mapa dos lugares encontrados"

@@ -1,4 +1,4 @@
-import axios, { AxiosError } from "axios";
+import axios, { AxiosError, type AxiosRequestConfig } from "axios";
 import { getIdToken } from "./auth";
 
 /** Single Axios instance for the Spring Boot backend. */
@@ -24,6 +24,24 @@ api.interceptors.request.use(async (config) => {
   }
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
+});
+
+api.interceptors.response.use(undefined, async (error: AxiosError) => {
+  const config = error.config as (AxiosRequestConfig & { _locusRetried?: boolean }) | undefined;
+  if (error.response?.status === 401 && config && !config._locusRetried) {
+    config._locusRetried = true;
+    try {
+      const token = await getIdToken(true);
+      if (token) {
+        config.headers = config.headers ?? {};
+        config.headers.Authorization = `Bearer ${token}`;
+        return api(config);
+      }
+    } catch {
+      // O normalizador abaixo transforma o 401 final em uma mensagem de sessão.
+    }
+  }
+  return Promise.reject(error);
 });
 
 export type TipoErro =

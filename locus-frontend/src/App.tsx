@@ -2188,7 +2188,7 @@ function LocationField({
 
   useEffect(() => {
     const query = value.trim();
-    if (query.length < 2) {
+    if (query.length < 2 || Boolean(codigoIataLocal(query))) {
       setSuggestions([]);
       setOpen(false);
       return;
@@ -2249,6 +2249,20 @@ function LocationField({
       </div>
     </label>
   );
+}
+
+function codigoIataLocal(valor: string): string {
+  const normalizado = valor
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+  if (/^[a-z]{3}$/.test(normalizado)) return normalizado.toUpperCase();
+  if (normalizado.includes("curacao") || normalizado.includes("willemstad")) return "CUR";
+  if (normalizado.includes("madeira") || normalizado.includes("funchal")) return "FNC";
+  if (normalizado.includes("salvador")) return "SSA";
+  if (normalizado.includes("lisboa") || normalizado === "portugal") return "LIS";
+  return "";
 }
 
 function SelectField({

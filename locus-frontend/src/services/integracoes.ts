@@ -346,14 +346,15 @@ export async function streetViewMetadata(lat: number, lng: number): Promise<Stre
     }),
   );
   const key = import.meta.env["VITE_GOOGLE_MAPS_API_KEY"] as string | undefined;
+  const usarEmbedApi = import.meta.env["VITE_GOOGLE_MAPS_EMBED_ENABLED"] === "true";
   return {
     ...resultado,
-    ...(key
+    ...(key && usarEmbedApi
       ? {
           embedUrl: `https://www.google.com/maps/embed/v1/streetview?key=${encodeURIComponent(key)}&location=${encodeURIComponent(`${lat},${lng}`)}&heading=0&pitch=0&fov=90`,
         }
       : {}),
-    ...(key && resultado.status === "OK"
+    ...(key && usarEmbedApi && resultado.status === "OK"
       ? {
           imagemUrl: `https://maps.googleapis.com/maps/api/streetview?size=640x360&location=${lat},${lng}&key=${encodeURIComponent(key)}`,
         }
