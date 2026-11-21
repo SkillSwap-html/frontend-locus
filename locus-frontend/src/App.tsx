@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 
 import { api, normalizarErro } from "@/services/api";
-import { entrar, entrarComGoogle, sair, usuarioAtual } from "@/services/auth";
+import { entrarComGoogle, sair, usuarioAtual } from "@/services/auth";
 import {
   autocomplete,
   buscaTextual,
@@ -711,22 +711,6 @@ function LoginPage({
   mensagem: string;
   onGoogle: () => void;
 }) {
-  const [email, setEmail] = useState("");
-  const [senha, setSenha] = useState("");
-  const [emailLoading, setEmailLoading] = useState(false);
-  const [erro, setErro] = useState("");
-  async function handleEmail(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setEmailLoading(true);
-    try {
-      const sessao = await entrar(email, senha);
-      window.location.reload();
-    } catch (error) {
-      setErro(normalizarErro(error).message);
-    } finally {
-      setEmailLoading(false);
-    }
-  }
   return (
     <main className="login-page">
       <section className="login-story">
@@ -774,36 +758,7 @@ function LoginPage({
           <button className="google-button" onClick={onGoogle} disabled={carregando}>
             <GoogleMark /> {carregando ? "Abrindo o Google..." : "Continuar com Google"}
           </button>
-          <div className="login-divider">
-            <span>ou use seu acesso Firebase</span>
-          </div>
-          <form className="email-form" onSubmit={(event) => void handleEmail(event)}>
-            <label>
-              E-mail
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="voce@exemplo.com"
-                required
-              />
-            </label>
-            <label>
-              Senha
-              <input
-                type="password"
-                value={senha}
-                onChange={(event) => setSenha(event.target.value)}
-                placeholder="mínimo de 6 caracteres"
-                minLength={6}
-                required
-              />
-            </label>
-            {(erro || mensagem) && <p className="form-error">{erro || mensagem}</p>}
-            <button className="primary-button full" disabled={emailLoading}>
-              {emailLoading ? "Entrando..." : "Entrar com e-mail"}
-            </button>
-          </form>
+          {mensagem && <p className="form-error">{mensagem}</p>}
         </div>
       </section>
     </main>
@@ -1607,23 +1562,37 @@ function AssistantView({
           dia: Math.min(diasDeViagem, Math.floor(index / 3) + 1),
           };
         });
+        const recomendacoesDaIa = respostaComOrcamento.recomendacoes ?? [];
+        const recomendacoesComDetalhes = [...recomendacoesReais, ...recomendacoesDaIa]
+          .filter((recomendacao, index, todas) => {
+            const titulo = recomendacao.titulo.trim().toLocaleLowerCase();
+            return todas.findIndex((candidata) => {
+              const mesmaIdentidade = recomendacao.placeId && candidata.placeId
+                ? recomendacao.placeId === candidata.placeId
+                : candidata.titulo.trim().toLocaleLowerCase() === titulo;
+              return mesmaIdentidade;
+            }) === index;
+          })
+          .slice(0, 8);
         respostaFinal = {
           ...respostaComOrcamento,
           texto: organizados.length
             ? `${resposta.texto} ${placesEmFallback ? `Encontrei ${organizados.length} opções de exemplo para ${destinoBusca || "o destino informado"} enquanto a consulta do Google Places é recomposta.` : `Encontrei ${organizados.length} locais reais${hospedagemBase ? ` em até 20 km da hospedagem ${hospedagemBase.nome}` : ""}.`} Veja a avaliação, abra o Street View e adicione somente os que desejar.`
             : `Não encontrei pontos turísticos dentro de 20 km da hospedagem ${hospedagemBase?.nome ?? "selecionada"}. Vou evitar sugerir locais distantes; pesquise um bairro ou local específico no campo ao lado.`,
-          ...(recomendacoesReais.length ? { recomendacoes: recomendacoesReais } : {}),
+          ...(recomendacoesComDetalhes.length ? { recomendacoes: recomendacoesComDetalhes } : {}),
         };
       } else {
         setLugares([]);
         setRota([]);
+        const possuiRecomendacoesDaIa = Boolean(respostaComOrcamento.recomendacoes?.length);
         respostaFinal = {
           ...respostaComOrcamento,
           texto: falhasBusca || placesEmFallback
-            ? `${respostaComOrcamento.texto} A consulta de lugares está temporariamente indisponível; o planejamento e o orçamento continuam disponíveis. Tente novamente em alguns segundos ou use a busca ao lado.`
-            : `${respostaComOrcamento.texto} Não encontrei resultados reais para essa busca no destino informado. Tente citar uma praia, museu, bairro ou ponto turístico específico.`,
+            ? `${respostaComOrcamento.texto} ${possuiRecomendacoesDaIa ? "A IA encontrou recomendações com nome e endereço para você conferir no Google." : "A consulta automática de lugares está temporariamente indisponível; tente novamente em alguns segundos."}`
+            : possuiRecomendacoesDaIa
+              ? `${respostaComOrcamento.texto} Confira no Google cada nome e endereço recomendado antes de adicionar ao roteiro.`
+              : `${respostaComOrcamento.texto} Não encontrei resultados para essa busca no destino informado. Tente citar uma praia, museu, bairro ou ponto turístico específico.`,
         };
-        delete respostaFinal.recomendacoes;
       }
       setMensagens((atuais) => atuais.map((item) => item.id === idResposta ? { ...respostaFinal, id: idResposta } : item));
     } catch {
