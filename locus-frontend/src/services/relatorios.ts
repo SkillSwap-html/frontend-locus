@@ -20,10 +20,18 @@ export async function listarRelatorios(viagemId?: string): Promise<Relatorio[]> 
       params: { usuarioSolicitanteId: backendUserId() },
     }),
   );
+  // Relatórios só existem depois da confirmação da simulação. Não consulte
+  // /relatorios/reserva para rascunhos ou pagamentos pendentes, pois o backend
+  // responde 400 enquanto ainda não há PDF para aquela reserva.
+  const reservasConfirmadas = reservas.filter((reserva) =>
+    String(reserva.status).toLowerCase().includes("confirmada"),
+  );
   const relatorios = await Promise.all(
-    reservas.map((reserva) =>
+    reservasConfirmadas.map((reserva) =>
       chamar<Record<string, unknown>>(() =>
-        api.get(`/api/relatorios/reserva/${reserva.id}`, {
+        // A geração é idempotente: se o relatório já existir, o backend o
+        // devolve; se faltar, ele é criado para a reserva confirmada.
+        api.post(`/api/relatorios/reserva/${reserva.id}`, undefined, {
           params: { usuarioSolicitanteId: backendUserId() },
         }),
       )

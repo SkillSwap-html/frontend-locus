@@ -1399,6 +1399,10 @@ function AssistantView({
   const [busca, setBusca] = useState("");
   const [lugares, setLugares] = useState<Lugar[]>([]);
   const [streetViews, setStreetViews] = useState<Record<string, StreetViewMeta>>({});
+  const [streetViewSelecionado, setStreetViewSelecionado] = useState<{
+    lugar: Lugar;
+    meta: StreetViewMeta;
+  } | null>(null);
   const [preferencias, setPreferencias] = useState<Preferencias | null>(null);
   const [hospedagemBase, setHospedagemBase] = useState<{ nome: string; lat: number; lng: number } | null>(null);
   const [rota, setRota] = useState<Trecho[]>([]);
@@ -1730,17 +1734,24 @@ function AssistantView({
   }
   async function revisarLugar(lugar: Lugar, _recomendacao?: Recomendacao) {
     const mapaUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lugar.lat},${lugar.lng}`;
-    const janela = window.open(mapaUrl, "_blank", "noopener,noreferrer");
-    if (!janela) onToast("Permita pop-ups para abrir o Google Street View.");
-    else onToast(`O Google Street View de ${lugar.nome} foi aberto em outra aba.`);
+    const metaInicial: StreetViewMeta = { status: "LOADING", mapaUrl };
+    setStreetViewSelecionado({ lugar, meta: metaInicial });
     try {
       const resultado = await streetViewMetadata(lugar.lat, lugar.lng);
-      setStreetViews((atual) => ({ ...atual, [lugar.placeId]: { ...resultado, mapaUrl } }));
-    } catch (error) {
+      const meta = { ...resultado, mapaUrl };
+      setStreetViews((atual) => ({ ...atual, [lugar.placeId]: meta }));
+      setStreetViewSelecionado((atual) => atual?.lugar.placeId === lugar.placeId ? { lugar, meta } : atual);
+    } catch {
       const fallback: StreetViewMeta = { status: "FALLBACK", mapaUrl };
       setStreetViews((atual) => ({ ...atual, [lugar.placeId]: fallback }));
-      if (janela) onToast("O Google Street View foi aberto. A confirmação de cobertura ficou disponível no cartão do local.");
+      setStreetViewSelecionado((atual) => atual?.lugar.placeId === lugar.placeId ? { lugar, meta: fallback } : atual);
     }
+  }
+  function abrirStreetViewGoogle() {
+    const url = streetViewSelecionado?.meta.mapaUrl;
+    if (!url) return;
+    const janela = window.open(url, "_blank", "noopener,noreferrer");
+    if (!janela) onToast("Permita pop-ups para abrir o Google Street View.");
   }
   function distanciaTexto(lugar: Lugar): string {
     const referencia = hospedagemBase ?? lugares[0];
@@ -2117,6 +2128,36 @@ function AssistantView({
           </div>
         </aside>
       </div>
+      {streetViewSelecionado && (
+        <div className="street-view-modal-backdrop" role="presentation" onClick={() => setStreetViewSelecionado(null)}>
+          <div className="street-view-modal" role="dialog" aria-modal="true" aria-labelledby="street-view-modal-title" onClick={(event) => event.stopPropagation()}>
+            <button className="street-view-modal-close" type="button" onClick={() => setStreetViewSelecionado(null)} aria-label="Fechar Street View">
+              <X size={18} />
+            </button>
+            <span className="section-label">Google Street View</span>
+            <h2 id="street-view-modal-title">{streetViewSelecionado.lugar.nome}</h2>
+            <p>{streetViewSelecionado.lugar.endereco || "Localização consultada no Google Places"}</p>
+            {streetViewSelecionado.meta.imagemUrl && (
+              <img
+                className="street-view-modal-image"
+                src={streetViewSelecionado.meta.imagemUrl}
+                alt={`Imagem de ${streetViewSelecionado.lugar.nome}`}
+              />
+            )}
+            <div className="street-view-modal-status">
+              {streetViewSelecionado.meta.status === "LOADING"
+                ? "Consultando a disponibilidade deste ponto..."
+                : streetViewSelecionado.meta.status === "OK"
+                  ? "Ponto encontrado. Abra a panorâmica real para explorar o local."
+                  : "O Google não confirmou uma imagem neste ponto, mas você pode abrir o Street View e explorar a região."}
+            </div>
+            <div className="street-view-modal-actions">
+              <button type="button" className="secondary-button" onClick={() => setStreetViewSelecionado(null)}>Fechar</button>
+              <button type="button" className="primary-button" onClick={abrirStreetViewGoogle}>Abrir no Google Street View <ArrowRight size={16} /></button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

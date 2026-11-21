@@ -396,6 +396,70 @@
 .route-preview { display: grid; gap: 5px; margin-top: 12px; padding: 10px; border-radius: 10px; background: #eef3ed; color: #5e7767; font-size: 9px; }
 .route-preview strong { color: var(--locus-deep); font-size: 10px; }
 .street-view-preview a { color: #5f6ca9; font-size: 10px; text-decoration: underline; }
+.street-view-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(28, 37, 34, .42);
+}
+.street-view-modal {
+  position: relative;
+  width: min(520px, 100%);
+  padding: 25px;
+  border: 1px solid #e5ddd2;
+  border-radius: 18px;
+  background: #fffefa;
+  box-shadow: 0 24px 70px rgba(24, 42, 34, .25);
+}
+.street-view-modal h2 {
+  margin: 8px 0 5px;
+  color: var(--locus-deep);
+  font-size: 21px;
+}
+.street-view-modal p {
+  margin: 0 0 16px;
+  color: #7d756e;
+  font-size: 12px;
+}
+.street-view-modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #756f69;
+  background: #f2eee8;
+}
+.street-view-modal-image {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  object-fit: cover;
+  border-radius: 12px;
+  background: #f1ece5;
+}
+.street-view-modal-status {
+  margin-top: 14px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  color: #58665f;
+  background: #f5f2eb;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.street-view-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
 .preferences-form { display: grid; gap: 18px; padding: 22px; }
 .preferences-form > label { display: grid; gap: 6px; color: #68736b; font-size: 11px; }
 .preferences-form input, .preferences-form select, .admin-add input, .admin-row select { min-height: 38px; border: 1px solid #e0dcd4; border-radius: 8px; padding: 0 10px; background: #fff; color: var(--locus-deep); }
