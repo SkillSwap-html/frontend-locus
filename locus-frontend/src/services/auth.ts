@@ -102,20 +102,18 @@ export async function entrar(email: string, senha: string): Promise<Usuario> {
   }
 }
 
-export async function entrarComGoogle(): Promise<Usuario> {
+export async function entrarComGoogle(): Promise<Usuario | null> {
   if (!firebaseAtivo)
     throw new AuthError("indisponivel", "Configure o Firebase para usar o login com Google.");
   try {
     const { auth, instance } = await fb();
     const provider = new auth.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
-    const cred = await auth.signInWithPopup(instance, provider);
-    return {
-      uid: cred.user.uid,
-      nome: cred.user.displayName ?? cred.user.email ?? "Viajante",
-      email: cred.user.email ?? "",
-      papel: "viajante",
-    };
+    // O fluxo por popup gera avisos de Cross-Origin-Opener-Policy no Chrome
+    // e pode ser bloqueado pelo navegador. O redirecionamento retorna à mesma
+    // página e usuarioAtual() restaura a sessão após o Firebase concluir.
+    await auth.signInWithRedirect(instance, provider);
+    return null;
   } catch (e) {
     throw traduzir((e as { code?: string }).code ?? "");
   }

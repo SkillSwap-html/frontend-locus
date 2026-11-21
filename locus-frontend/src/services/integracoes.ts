@@ -148,9 +148,17 @@ function lugaresDemonstrativos(consulta: string): Lugar[] {
 
 function sugestoesLocaisFallback(valor: string): { id: string; texto: string }[] {
   const consulta = normalizarBusca(valor);
-  return SUGESTOES_LOCAIS
+  const conhecidas = SUGESTOES_LOCAIS
     .filter((item) => normalizarBusca(item.texto).includes(consulta))
     .slice(0, 6);
+  if (conhecidas.length) return conhecidas;
+
+  // Mesmo com o Places temporariamente limitado, a pessoa ainda pode
+  // escolher o texto digitado e seguir para a busca/planejamento local.
+  const textoDigitado = valor.trim();
+  return textoDigitado
+    ? [{ id: `local-input-${consulta.replace(/[^a-z0-9]+/g, "-")}`, texto: textoDigitado }]
+    : [];
 }
 
 const IMAGENS_HOSPEDAGEM_EXEMPLO = [
@@ -708,10 +716,10 @@ export interface StreetViewMeta {
   data?: string;
 }
 
-export async function streetViewMetadata(lat: number, lng: number): Promise<StreetViewMeta> {
+export async function streetViewMetadata(lat: number, lng: number, radius = 150): Promise<StreetViewMeta> {
   const resultado = await chamar<StreetViewMeta>(() =>
     api.get<StreetViewMeta>(`${BASE}/google/street-view/metadata`, {
-      params: { location: `${lat},${lng}` },
+      params: { location: `${lat},${lng}`, radius },
     }),
   );
   let imagemUrl: string | undefined;

@@ -40,7 +40,6 @@ import {
   calcularRota,
   perguntarGemini,
   respostaLocalAssistente,
-  streetViewMetadata,
   type StreetViewMeta,
   type Trecho,
 } from "@/services/integracoes";
@@ -295,8 +294,10 @@ function App() {
     setCarregando(true);
     try {
       const sessao = await entrarComGoogle();
-      setUsuario(sessao);
-      setToast("Login com Google concluído.");
+      if (sessao) {
+        setUsuario(sessao);
+        setToast("Login com Google concluído.");
+      }
     } catch (error) {
       setToast(normalizarErro(error).message);
     } finally {
@@ -1732,20 +1733,24 @@ function AssistantView({
       onToast(normalizarErro(error).message);
     }
   }
-  async function revisarLugar(lugar: Lugar, _recomendacao?: Recomendacao) {
-    const mapaUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lugar.lat},${lugar.lng}`;
-    const metaInicial: StreetViewMeta = { status: "LOADING", mapaUrl };
-    setStreetViewSelecionado({ lugar, meta: metaInicial });
-    try {
-      const resultado = await streetViewMetadata(lugar.lat, lugar.lng);
-      const meta = { ...resultado, mapaUrl };
-      setStreetViews((atual) => ({ ...atual, [lugar.placeId]: meta }));
-      setStreetViewSelecionado((atual) => atual?.lugar.placeId === lugar.placeId ? { lugar, meta } : atual);
-    } catch {
-      const fallback: StreetViewMeta = { status: "FALLBACK", mapaUrl };
-      setStreetViews((atual) => ({ ...atual, [lugar.placeId]: fallback }));
-      setStreetViewSelecionado((atual) => atual?.lugar.placeId === lugar.placeId ? { lugar, meta: fallback } : atual);
+  function revisarLugar(lugar: Lugar, _recomendacao?: Recomendacao) {
+    const coordenadasValidas = Number.isFinite(lugar.lat)
+      && Number.isFinite(lugar.lng)
+      && !(lugar.lat === 0 && lugar.lng === 0);
+    const mapaUrl = coordenadasValidas
+      ? `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lugar.lat},${lugar.lng}`
+      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([lugar.nome, lugar.endereco].filter(Boolean).join(", "))}`;
+    const metaExistente = streetViews[lugar.placeId];
+    if (metaExistente) {
+      setStreetViewSelecionado({ lugar, meta: { ...metaExistente, mapaUrl } });
+      return;
     }
+    // A panorâmica é aberta no Google por coordenadas. Assim o usuário não
+    // fica dependente da chave JavaScript/Street View do frontend, que pode
+    // estar restrita no Google Cloud mesmo quando Places funciona.
+    const meta: StreetViewMeta = { status: "EXTERNAL", mapaUrl };
+    setStreetViews((atual) => ({ ...atual, [lugar.placeId]: meta }));
+    setStreetViewSelecionado({ lugar, meta });
   }
   function abrirStreetViewGoogle() {
     const url = streetViewSelecionado?.meta.mapaUrl;
@@ -2145,11 +2150,11 @@ function AssistantView({
               />
             )}
             <div className="street-view-modal-status">
-              {streetViewSelecionado.meta.status === "LOADING"
-                ? "Consultando a disponibilidade deste ponto..."
+              {streetViewSelecionado.meta.status === "EXTERNAL"
+                ? "A vista panorâmica será aberta no Google Street View, no ponto selecionado."
                 : streetViewSelecionado.meta.status === "OK"
                   ? "Ponto encontrado. Abra a panorâmica real para explorar o local."
-                  : "O Google não confirmou uma imagem neste ponto, mas você pode abrir o Street View e explorar a região."}
+                  : "Você pode abrir o Street View e explorar a região no Google."}
             </div>
             <div className="street-view-modal-actions">
               <button type="button" className="secondary-button" onClick={() => setStreetViewSelecionado(null)}>Fechar</button>
@@ -2561,19 +2566,25 @@ function LocationField({
       return;
     }
 
+    let ativo = true;
     const timer = window.setTimeout(() => {
       void autocomplete(query)
         .then((items) => {
+          if (!ativo) return;
           setSuggestions(items);
           setOpen(items.length > 0);
         })
         .catch(() => {
+          if (!ativo) return;
           setSuggestions([]);
           setOpen(false);
         });
     }, 300);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      ativo = false;
+      window.clearTimeout(timer);
+    };
   }, [value]);
 
   return (
