@@ -51,7 +51,6 @@ import { adicionarRecomendacao, compararVersoes, criarLinkCompartilhamento, cria
 import { limparUsuarioBackend, sincronizarUsuario } from "@/services/usuarioBackend";
 import { criarViagem, definirLimitesOrcamento, listarNotificacoes, listarViagens, marcarLida, marcarTodasComoLidas, obterViagem } from "@/services/viagens";
 import { MapPreview } from "@/components/MapPreview";
-import { GoogleStreetView } from "@/components/GoogleStreetView";
 import { AdminView } from "@/components/AdminView";
 import { PlanningFlow } from "@/components/PlanningFlow";
 import { PreferencesView } from "@/components/PreferencesView";
@@ -106,6 +105,15 @@ function campo<T = unknown>(obj: unknown, chave: string): T | undefined {
 }
 function tituloViagem(viagem: Viagem): string {
   return viagem.titulo || `Roteiro para ${viagem.destino || "seu próximo destino"}`;
+}
+function nomeArquivoRoteiro(viagem: Viagem): string {
+  const slug = tituloViagem(viagem)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase() || "locus";
+  return `roteiro-${slug}.pdf`;
 }
 function transporteViagem(viagem: Viagem): string {
   return viagem.transporte || String(campo(viagem, "modoTransporte") ?? "aviao").toLowerCase();
@@ -659,8 +667,10 @@ function App() {
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement("a");
                   a.href = url;
-                  a.download =
-                    campo<string>(relatorio, "nomeArquivo") ?? `locus-${relatorio.protocolo}.pdf`;
+                  const viagemDoRelatorio = viagens.find((item) => item.id === relatorio.viagemId);
+                  a.download = viagemDoRelatorio
+                    ? nomeArquivoRoteiro(viagemDoRelatorio)
+                    : campo<string>(relatorio, "nomeArquivo") ?? `locus-${relatorio.protocolo}.pdf`;
                   a.click();
                   URL.revokeObjectURL(url);
                 } catch (error) {
@@ -1384,7 +1394,6 @@ function AssistantView({
   const [busca, setBusca] = useState("");
   const [lugares, setLugares] = useState<Lugar[]>([]);
   const [streetViews, setStreetViews] = useState<Record<string, StreetViewMeta>>({});
-  const [streetViewSelecionado, setStreetViewSelecionado] = useState<{ lugar: Lugar; meta: StreetViewMeta; recomendacao?: Recomendacao } | null>(null);
   const [preferencias, setPreferencias] = useState<Preferencias | null>(null);
   const [hospedagemBase, setHospedagemBase] = useState<{ nome: string; lat: number; lng: number } | null>(null);
   const [rota, setRota] = useState<Trecho[]>([]);
@@ -1714,22 +1723,18 @@ function AssistantView({
       onToast(normalizarErro(error).message);
     }
   }
-  async function revisarLugar(lugar: Lugar, recomendacao?: Recomendacao) {
-    onToast(`Consultando o Street View de ${lugar.nome}...`);
+  async function revisarLugar(lugar: Lugar, _recomendacao?: Recomendacao) {
+    const mapaUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lugar.lat},${lugar.lng}`;
+    const janela = window.open(mapaUrl, "_blank", "noopener,noreferrer");
+    if (!janela) onToast("Permita pop-ups para abrir o Google Street View.");
+    else onToast(`O Google Street View de ${lugar.nome} foi aberto em outra aba.`);
     try {
       const resultado = await streetViewMetadata(lugar.lat, lugar.lng);
-      setStreetViews((atual) => ({ ...atual, [lugar.placeId]: resultado }));
-      setStreetViewSelecionado({ lugar, meta: resultado, ...(recomendacao ? { recomendacao } : {}) });
-      onToast(
-        resultado.status === "OK"
-          ? `${lugar.nome} está pronto para você conferir no mapa e no Street View.`
-          : `O Street View não encontrou uma imagem disponível para ${lugar.nome}.`,
-      );
+      setStreetViews((atual) => ({ ...atual, [lugar.placeId]: { ...resultado, mapaUrl } }));
     } catch (error) {
-      const fallback: StreetViewMeta = { status: "FALLBACK", mapaUrl: `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lugar.lat},${lugar.lng}` };
+      const fallback: StreetViewMeta = { status: "FALLBACK", mapaUrl };
       setStreetViews((atual) => ({ ...atual, [lugar.placeId]: fallback }));
-      setStreetViewSelecionado({ lugar, meta: fallback, ...(recomendacao ? { recomendacao } : {}) });
-      onToast("A visualização foi aberta no Google Maps. A imagem depende da disponibilidade do ponto.");
+      if (janela) onToast("O Google Street View foi aberto. A confirmação de cobertura ficou disponível no cartão do local.");
     }
   }
   function distanciaTexto(lugar: Lugar): string {
@@ -2076,8 +2081,7 @@ function AssistantView({
                             : "Sem imagem disponível para este ponto"}
                         </small>
                       </div>
-                      <GoogleStreetView lat={lugar.lat} lng={lugar.lng} imagemUrl={streetView.imagemUrl} className="street-view-inline-frame" />
-                      {streetView.mapaUrl && <a href={streetView.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Street View</a>}
+                      {streetView.mapaUrl && <a href={streetView.mapaUrl} target="_blank" rel="noreferrer">Abrir novamente no Google Street View</a>}
                     </div>
                   );
                 })}
@@ -2104,23 +2108,6 @@ function AssistantView({
           </div>
         </aside>
       </div>
-      {streetViewSelecionado && (
-        <div className="offer-modal-backdrop" role="dialog" aria-modal="true" aria-label="Street View do local">
-          <div className="offer-modal street-view-modal">
-            <button className="offer-modal-close" type="button" onClick={() => setStreetViewSelecionado(null)} aria-label="Fechar"><X size={17} /></button>
-            <span className="section-label">Antes de adicionar</span>
-            <h3>{streetViewSelecionado.lugar.nome}</h3>
-            <GoogleStreetView lat={streetViewSelecionado.lugar.lat} lng={streetViewSelecionado.lugar.lng} imagemUrl={streetViewSelecionado.meta.imagemUrl} />
-            <p>{streetViewSelecionado.lugar.endereco || "Local consultado no mapa"}</p>
-            <div className="street-view-details">
-              <span>{streetViewSelecionado.lugar.categoria}</span>
-              {streetViewSelecionado.lugar.avaliacao ? <span>★ {streetViewSelecionado.lugar.avaliacao.toFixed(1)} no Google</span> : <span>Avaliação não informada</span>}
-              {streetViewSelecionado.lugar.aberto != null && <span>{streetViewSelecionado.lugar.aberto ? "Aberto agora" : "Fechado agora"}</span>}
-            </div>
-            <div className="offer-modal-actions"><a className="secondary-button" href={streetViewSelecionado.meta.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Maps</a><button className="primary-button" type="button" onClick={() => { const estimativa = estimativaLocal(streetViewSelecionado.lugar); const recomendacao = streetViewSelecionado.recomendacao; adicionarRecomendacaoControlada({ id: `lugar-${streetViewSelecionado.lugar.placeId}`, placeId: streetViewSelecionado.lugar.placeId, tipo: "lugar", titulo: streetViewSelecionado.lugar.nome, resumo: `${streetViewSelecionado.lugar.categoria} · ${streetViewSelecionado.lugar.endereco}`, justificativa: "Lugar consultado no Google Places e conferido no Street View.", evidencia: { fonte: streetViewSelecionado.lugar.fonte, consultadoEm: streetViewSelecionado.lugar.consultadoEm }, ...(streetViewSelecionado.lugar.avaliacao ? { avaliacao: streetViewSelecionado.lugar.avaliacao } : {}), endereco: streetViewSelecionado.lugar.endereco, lat: streetViewSelecionado.lugar.lat, lng: streetViewSelecionado.lugar.lng, categoriaLocal: streetViewSelecionado.lugar.categoria, ...(estimativa.valor > 0 ? { valor: estimativa.valor } : {}), categoria: recomendacao?.categoria ?? estimativa.categoria, natureza: recomendacao?.natureza ?? (estimativa.valor > 0 ? "estimado" : "observado"), ...(recomendacao?.horario ? { horario: recomendacao.horario } : {}), ...(recomendacao?.duracaoMinutos ? { duracaoMinutos: recomendacao.duracaoMinutos } : {}), dia: recomendacao?.dia ?? diasLugares[streetViewSelecionado.lugar.placeId] ?? 1 }); setStreetViewSelecionado(null); }}><Plus size={15} /> Adicionar ao roteiro</button></div>
-          </div>
-        </div>
-      )}
     </section>
   );
 }

@@ -51,6 +51,9 @@ export function GoogleMapCanvas({ lugares }: { lugares: Lugar[] }) {
       <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${pontos[0]!.lat},${pontos[0]!.lng}`)}`} target="_blank" rel="noreferrer">
         Abrir no Google Maps
       </a>
+      <a href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${pontos[0]!.lat},${pontos[0]!.lng}`} target="_blank" rel="noreferrer">
+        Abrir no Google Street View
+      </a>
     </div>
   );
 }

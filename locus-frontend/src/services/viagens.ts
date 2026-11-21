@@ -72,7 +72,7 @@ async function hidratar(raw: Record<string, unknown>): Promise<Viagem> {
   const userId = backendUserId();
   const base: Viagem = {
     id,
-    titulo: `Roteiro para ${String(raw["destino"] ?? "sua próxima viagem")}`,
+    titulo: String(raw["titulo"] ?? `Roteiro para ${String(raw["destino"] ?? "sua próxima viagem")}`),
     origem: String(raw["origem"] ?? ""),
     destino: String(raw["destino"] ?? ""),
     dataInicio: String(raw["dataInicio"] ?? ""),
