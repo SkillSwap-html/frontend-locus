@@ -90,18 +90,6 @@ export async function getIdToken(forceRefresh = false): Promise<string | null> {
   return currentUser ? await currentUser.getIdToken(forceRefresh) : null;
 }
 
-export async function entrar(email: string, senha: string): Promise<Usuario> {
-  if (!firebaseAtivo)
-    throw new AuthError("indisponivel", "Configure o Firebase para entrar no Locus.");
-  try {
-    const { auth, instance } = await fb();
-    const cred = await auth.signInWithEmailAndPassword(instance, email, senha);
-    return { uid: cred.user.uid, nome: cred.user.displayName ?? email, email, papel: "viajante" };
-  } catch (e) {
-    throw traduzir((e as { code?: string }).code ?? "");
-  }
-}
-
 export async function entrarComGoogle(): Promise<Usuario | null> {
   if (!firebaseAtivo)
     throw new AuthError("indisponivel", "Configure o Firebase para usar o login com Google.");

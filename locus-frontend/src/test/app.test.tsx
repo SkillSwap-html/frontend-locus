@@ -5,7 +5,6 @@ import App from "@/App";
 
 vi.mock("@/services/auth", () => ({
   usuarioAtual: vi.fn().mockResolvedValue(null),
-  entrar: vi.fn(),
   entrarComGoogle: vi.fn(),
   firebaseAtivo: false,
   sair: vi.fn(),

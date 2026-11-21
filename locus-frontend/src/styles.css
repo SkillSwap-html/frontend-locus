@@ -2481,49 +2481,6 @@ h3 {
   width: 18px;
   height: 18px;
 }
-.login-divider {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: #a0aaa3;
-  font-size: 9px;
-  margin: 22px 0;
-}
-.login-divider:before,
-.login-divider:after {
-  content: "";
-  height: 1px;
-  background: #e8e8e1;
-  flex: 1;
-}
-.email-form {
-  display: grid;
-  gap: 13px;
-}
-.email-form label {
-  color: #68796f;
-  font-size: 11px;
-  font-weight: 800;
-  display: grid;
-  gap: 6px;
-}
-.email-form input {
-  height: 44px;
-  border: 1px solid #dfe3dd;
-  border-radius: 9px;
-  outline: 0;
-  color: var(--locus-deep);
-  padding: 0 12px;
-  font-size: 12px;
-  background: #fff;
-}
-.email-form input:focus {
-  border-color: var(--locus-coral);
-  box-shadow: 0 0 0 3px rgba(238, 121, 95, 0.1);
-}
-.full {
-  width: 100%;
-}
 .form-error {
   color: #b15b4a;
   background: #fcede9;
