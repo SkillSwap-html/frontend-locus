@@ -1,23 +1,17 @@
 import type { Lugar } from "@/types";
 import { ExternalLink, MapPin } from "lucide-react";
 
-function coordenadasValidas(lugar: Lugar): boolean {
-  return Number.isFinite(lugar.lat)
-    && Number.isFinite(lugar.lng)
-    && !(lugar.lat === 0 && lugar.lng === 0);
+function consultaDoLugar(lugar: Lugar): string {
+  return [lugar.nome, lugar.endereco].filter(Boolean).join(", ");
 }
 
 function urlMaps(lugar: Lugar): string {
-  const consulta = coordenadasValidas(lugar)
-    ? `${lugar.lat},${lugar.lng}`
-    : [lugar.nome, lugar.endereco].filter(Boolean).join(", ");
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(consulta)}`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(consultaDoLugar(lugar))}`;
 }
 
 function urlStreetView(lugar: Lugar): string {
-  if (coordenadasValidas(lugar)) {
-    return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lugar.lat},${lugar.lng}`;
-  }
+  // O Google Maps resolve o local pelo nome + endereço e, a partir da página
+  // correta do lugar, permite abrir a panorâmica Street View disponível.
   return urlMaps(lugar);
 }
 
@@ -38,8 +32,11 @@ export function MapPreview({ lugares }: { lugares: Lugar[] }) {
       <div className="map-preview-place-list">
         {principais.map((lugar) => (
           <div className="map-preview-place" key={lugar.placeId || lugar.nome}>
-            <span>{lugar.nome}</span>
-            <div>
+            <div className="map-preview-place-info">
+              <strong>{lugar.nome}</strong>
+              <small>{lugar.endereco || "Endereço não informado"}</small>
+            </div>
+            <div className="map-preview-place-actions">
               <a href={urlMaps(lugar)} target="_blank" rel="noreferrer" aria-label={`Abrir ${lugar.nome} no Google Maps`}>
                 <ExternalLink size={12} /> Maps
               </a>

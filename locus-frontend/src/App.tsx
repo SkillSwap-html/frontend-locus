@@ -1734,21 +1734,18 @@ function AssistantView({
     }
   }
   function revisarLugar(lugar: Lugar, _recomendacao?: Recomendacao) {
-    const coordenadasValidas = Number.isFinite(lugar.lat)
-      && Number.isFinite(lugar.lng)
-      && !(lugar.lat === 0 && lugar.lng === 0);
+    // Sempre usamos o nome e o endereço exibidos ao usuário. Coordenadas
+    // antigas ou demonstrativas podem apontar para outra cidade; o Google
+    // resolve a página correta do lugar a partir desta consulta textual.
     const consulta = encodeURIComponent([lugar.nome, lugar.endereco].filter(Boolean).join(", "));
-    const mapaUrl = coordenadasValidas
-      ? `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lugar.lat},${lugar.lng}`
-      : `https://www.google.com/maps/search/?api=1&query=${consulta}`;
+    const mapaUrl = `https://www.google.com/maps/search/?api=1&query=${consulta}`;
     const metaExistente = streetViews[lugar.placeId];
     if (metaExistente) {
       setStreetViewSelecionado({ lugar, meta: { ...metaExistente, mapaUrl } });
       return;
     }
-    // A panorâmica é aberta no Google por coordenadas. Assim o usuário não
-    // fica dependente da chave JavaScript/Street View do frontend, que pode
-    // estar restrita no Google Cloud mesmo quando Places funciona.
+    // A panorâmica é aberta no Google pelo nome e endereço. Assim o usuário
+    // não fica dependente da chave JavaScript/Street View do frontend.
     const meta: StreetViewMeta = { status: "EXTERNAL", mapaUrl };
     setStreetViews((atual) => ({ ...atual, [lugar.placeId]: meta }));
     setStreetViewSelecionado({ lugar, meta });
@@ -1762,12 +1759,7 @@ function AssistantView({
   function abrirMapsGoogle() {
     const lugar = streetViewSelecionado?.lugar;
     if (!lugar) return;
-    const coordenadasValidas = Number.isFinite(lugar.lat)
-      && Number.isFinite(lugar.lng)
-      && !(lugar.lat === 0 && lugar.lng === 0);
-    const consulta = coordenadasValidas
-      ? `${lugar.lat},${lugar.lng}`
-      : [lugar.nome, lugar.endereco].filter(Boolean).join(", ");
+    const consulta = [lugar.nome, lugar.endereco].filter(Boolean).join(", ");
     const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(consulta)}`;
     const janela = window.open(url, "_blank", "noopener,noreferrer");
     if (!janela) onToast("Permita pop-ups para abrir o Google Maps.");
@@ -1805,7 +1797,10 @@ function AssistantView({
       return {
         placeId: recomendacao.placeId || recomendacao.id,
         nome: recomendacao.titulo,
-        endereco: recomendacao.endereco ?? "",
+        // Quando a IA ainda não recebeu o endereço estruturado do Places,
+        // a consulta completa normalmente contém cidade e país. Preserve-a
+        // para que o botão do Maps não pesquise apenas o título do local.
+        endereco: recomendacao.endereco || recomendacao.consulta || "",
         categoria: recomendacao.categoriaLocal ?? "Ponto de interesse",
         ...(recomendacao.avaliacao != null ? { avaliacao: recomendacao.avaliacao } : {}),
         lat: 0,
@@ -1952,6 +1947,11 @@ function AssistantView({
                           </span>
                         )}
                         <span>{recomendacao.resumo}</span>
+                        <small className="recommendation-address">
+                          {recomendacao.endereco
+                            ? `Endereço: ${recomendacao.endereco}`
+                            : `Busca no Google: ${recomendacao.consulta || recomendacao.titulo}`}
+                        </small>
                         <small>
                           {recomendacao.categoriaLocal ? `${recomendacao.categoriaLocal} · ` : ""}
                           {recomendacao.dia ? `Dia ${recomendacao.dia} · ` : ""}
@@ -2182,7 +2182,7 @@ function AssistantView({
             )}
             <div className="street-view-modal-status">
               {streetViewSelecionado.meta.status === "EXTERNAL"
-                ? "A vista panorâmica será aberta no Google Street View, no ponto selecionado."
+                ? "O Google será aberto pelo nome e endereço acima. Na página correta do lugar, escolha Street View para ver a panorâmica disponível."
                 : streetViewSelecionado.meta.status === "OK"
                   ? "Ponto encontrado. Abra a panorâmica real para explorar o local."
                   : "Você pode abrir o Street View e explorar a região no Google."}
