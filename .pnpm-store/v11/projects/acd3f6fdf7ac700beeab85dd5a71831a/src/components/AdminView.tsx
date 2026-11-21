@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Activity, Clock3, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
-import { adicionarAdministrador, alterarTipoUsuario, listarAdministradores, listarUsuariosAdmin, removerAdministrador, type AdminEmail, type UsuarioAdmin } from "@/services/admin";
+import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { adicionarAdministrador, alterarTipoUsuario, listarAdministradores, listarDashboardAdmin, listarUsuariosAdmin, removerAdministrador, type AdminEmail, type DashboardAdmin, type UsuarioAdmin } from "@/services/admin";
 
 const tipos = ["VIAJANTE", "ADMINISTRADOR", "CURADOR_CONTEUDO", "RESPONSAVEL_TECNICO"];
 
@@ -8,14 +9,21 @@ export function AdminView({ onToast }: { onToast: (value: string) => void }) {
   const [admins, setAdmins] = useState<AdminEmail[]>([]);
   const [usuarios, setUsuarios] = useState<UsuarioAdmin[]>([]);
   const [email, setEmail] = useState("");
+  const [dashboard, setDashboard] = useState<DashboardAdmin | null>(null);
+  const [quantidadeDestinos, setQuantidadeDestinos] = useState("5");
   const [carregando, setCarregando] = useState(true);
 
   async function carregar() {
     setCarregando(true);
     try {
-      const [listaAdmins, listaUsuarios] = await Promise.all([listarAdministradores(), listarUsuariosAdmin()]);
+      const [listaAdmins, listaUsuarios, dadosDashboard] = await Promise.all([
+        listarAdministradores(),
+        listarUsuariosAdmin(),
+        listarDashboardAdmin().catch(() => null),
+      ]);
       setAdmins(listaAdmins);
       setUsuarios(listaUsuarios);
+      setDashboard(dadosDashboard);
     } catch (error) {
       onToast(error instanceof Error ? error.message : "Não foi possível carregar a administração.");
     } finally {
@@ -60,6 +68,14 @@ export function AdminView({ onToast }: { onToast: (value: string) => void }) {
 
   const contasPendentes = admins.filter((item) => !item.contaEncontrada).length;
   const administradoresAtivos = usuarios.filter((item) => item.tipoUsuario === "ADMINISTRADOR").length;
+  const destinos = useMemo(() => {
+    const limite = quantidadeDestinos === "todos" ? Number.POSITIVE_INFINITY : Number(quantidadeDestinos);
+    return (dashboard?.destinos ?? []).slice(0, limite).map((item, index) => ({
+      ...item,
+      nome: item.destino,
+      cor: ["#ef765f", "#7b6bb0", "#78a88a", "#d5a45d", "#5d8ca5", "#c4869a", "#87945c", "#a7745d"][index % 8],
+    }));
+  }, [dashboard?.destinos, quantidadeDestinos]);
 
   return (
     <section className="view-stack">
@@ -68,10 +84,17 @@ export function AdminView({ onToast }: { onToast: (value: string) => void }) {
         <div className="assistant-heading-mark"><ShieldCheck size={28} /></div>
       </div>
       <div className="admin-metrics">
-        <div className="admin-metric"><Users size={19} /><span>Usuários cadastrados</span><strong>{usuarios.length}</strong></div>
+        <div className="admin-metric"><Users size={19} /><span>Usuários cadastrados</span><strong>{dashboard?.usuarios ?? usuarios.length}</strong></div>
         <div className="admin-metric"><ShieldCheck size={19} /><span>Administradores ativos</span><strong>{administradoresAtivos}</strong></div>
         <div className="admin-metric"><Clock3 size={19} /><span>Convites pendentes</span><strong>{contasPendentes}</strong></div>
-        <div className="admin-metric"><Activity size={19} /><span>Status do painel</span><strong>{carregando ? "..." : "Ativo"}</strong></div>
+        <div className="admin-metric"><Activity size={19} /><span>Viagens criadas</span><strong>{dashboard?.viagens ?? "—"}</strong></div>
+      </div>
+      <div className="surface-panel admin-panel admin-analytics">
+        <div className="section-heading">
+          <div><span className="section-label">Análise de mercado</span><h2>Destinos mais procurados</h2><p className="field-hint">Baseado nos roteiros criados pelos usuários da plataforma.</p></div>
+          <label className="admin-filter">Exibir<select value={quantidadeDestinos} onChange={(event) => setQuantidadeDestinos(event.target.value)}><option value="5">5 destinos</option><option value="10">10 destinos</option><option value="todos">Todos</option></select></label>
+        </div>
+        {dashboard && destinos.length ? <div className="admin-chart-layout"><div className="admin-pie-chart"><ResponsiveContainer width="100%" height={270}><PieChart><Pie data={destinos} dataKey="quantidade" nameKey="nome" innerRadius={62} outerRadius={98} paddingAngle={3}>{destinos.map((item) => <Cell key={item.nome} fill={item.cor} />)}</Pie><Tooltip formatter={(value) => [`${value} viagem(ns)`, "Procura"]} /><Legend /></PieChart></ResponsiveContainer></div><div className="admin-destination-list">{destinos.map((item, index) => <div className="admin-destination-row" key={item.nome}><span className="admin-destination-dot" style={{ background: item.cor }} /><strong>{index + 1}. {item.nome}</strong><span>{item.quantidade}</span></div>)}</div></div> : <div className="admin-chart-empty">Ainda não há viagens suficientes para gerar o gráfico.</div>}
       </div>
       <div className="admin-grid">
         <div className="surface-panel admin-panel">

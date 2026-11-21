@@ -13,6 +13,26 @@ const numero = (value: unknown, fallback = 0) =>
 const objeto = (value: unknown): Json =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : {};
 
+function rotuloTipoLugar(tipo: unknown): string {
+  const rotulos: Record<string, string> = {
+    tourist_attraction: "Ponto turístico",
+    historical_landmark: "Lugar histórico",
+    museum: "Museu",
+    art_gallery: "Galeria de arte",
+    park: "Parque",
+    beach: "Praia",
+    restaurant: "Restaurante",
+    cafe: "Café",
+    lodging: "Hospedagem",
+    hotel: "Hotel",
+    church: "Igreja",
+    shopping_mall: "Shopping",
+    natural_feature: "Atração natural",
+  };
+  const valor = texto(tipo);
+  return rotulos[valor] || valor.replaceAll("_", " ") || "Ponto de interesse";
+}
+
 function normalizarLugar(raw: unknown): Lugar {
   const value = objeto(raw);
   const displayName = objeto(value.displayName);
@@ -23,7 +43,7 @@ function normalizarLugar(raw: unknown): Lugar {
     placeId: texto(value.id) || texto(value.name),
     nome: texto(displayName.text) || texto(value.name) || "Lugar sem nome",
     endereco: texto(value.formattedAddress) || texto(value.shortFormattedAddress),
-    categoria: texto(types[0]) || "Ponto de interesse",
+    categoria: rotuloTipoLugar(types[0]),
     lat: numero(location.latitude),
     lng: numero(location.longitude),
     descricao: texto(value.editorialSummary),
@@ -93,6 +113,11 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
       },
       ...(texto(value.consulta) ? { consulta: texto(value.consulta) } : {}),
       ...(texto(value.placeId) ? { placeId: texto(value.placeId) } : {}),
+      ...(Number.isFinite(Number(value.avaliacao)) ? { avaliacao: Number(value.avaliacao) } : {}),
+      ...(texto(value.endereco) ? { endereco: texto(value.endereco) } : {}),
+      ...(Number.isFinite(Number(value.lat)) ? { lat: Number(value.lat) } : {}),
+      ...(Number.isFinite(Number(value.lng)) ? { lng: Number(value.lng) } : {}),
+      ...(texto(value.categoriaLocal) ? { categoriaLocal: texto(value.categoriaLocal) } : {}),
       ...(Number.isInteger(Number(value.dia)) ? { dia: Number(value.dia) } : {}),
       ...(Number.isInteger(Number(value.duracaoMinutos)) ? { duracaoMinutos: Number(value.duracaoMinutos) } : {}),
       ...(Number.isFinite(Number(value.valor)) ? { valor: Number(value.valor) } : {}),
@@ -130,6 +155,7 @@ type ContextoAssistente = {
   interesses?: string[];
   ritmo?: string;
   hospedagem?: string;
+  hospedagemBase?: string;
   roteiro?: string;
 };
 
@@ -189,10 +215,11 @@ export async function perguntarGemini(
         contexto.interesses?.length ? `Interesses: ${contexto.interesses.join(", ")}.` : "",
         contexto.ritmo ? `Ritmo: ${contexto.ritmo}.` : "",
         contexto.hospedagem ? `Hospedagem preferida: ${contexto.hospedagem}.` : "",
+        contexto.hospedagemBase ? `Base de proximidade obrigatória: ${contexto.hospedagemBase}. Recomende locais turísticos próximos dessa hospedagem.` : "",
         contexto.roteiro ? `Itens já adicionados ao roteiro: ${contexto.roteiro}.` : "",
       ].filter(Boolean).join(" ")
     : "";
-  const regras = "Não repita saudações nem perguntas já respondidas. Recomende somente locais dentro do destino obrigatório; para locais nomeados, gere consultas ao Google Places e deixe a confirmação dos dados para a busca real.";
+  const regras = "Não repita saudações nem perguntas já respondidas. Recomende somente locais dentro do destino obrigatório; para locais nomeados, gere consultas ao Google Places e deixe a confirmação dos dados para a busca real. Quando houver hospedagem-base, priorize locais em até 20 km dela e informe que o sistema vai conferir a distância e a rota.";
   const prompt = [financeiro, viagem, regras, historicoTexto, `Usuário: ${textoPergunta}`]
     .filter(Boolean)
     .join("\n\n");

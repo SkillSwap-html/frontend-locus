@@ -10,6 +10,7 @@ import {
   CircleUserRound,
   Compass,
   Download,
+  Eye,
   FileText,
   Globe2,
   Heart,
@@ -134,10 +135,16 @@ function distanciaKm(a: Pick<Lugar, "lat" | "lng">, b: Pick<Lugar, "lat" | "lng"
   const seno = Math.sin(latitude / 2) ** 2 + Math.cos(origem) * Math.cos(destino) * Math.sin(longitude / 2) ** 2;
   return raio * 2 * Math.atan2(Math.sqrt(seno), Math.sqrt(1 - seno));
 }
-function ordenarLugares(lugares: Lugar[]): Lugar[] {
+function ordenarLugares(lugares: Lugar[], referencia?: Pick<Lugar, "lat" | "lng">): Lugar[] {
   if (lugares.length < 2) return lugares;
-  const resultado: Lugar[] = [lugares[0]!];
-  const restantes = lugares.slice(1);
+  const primeiro = referencia
+    ? [...lugares].sort((a, b) => distanciaKm(referencia, a) - distanciaKm(referencia, b))[0]!
+    : lugares[0]!;
+  const resultado: Lugar[] = [{
+    ...primeiro,
+    ...(referencia ? { distanciaKm: distanciaKm(referencia, primeiro) } : {}),
+  }];
+  const restantes = lugares.filter((item) => item.placeId !== primeiro.placeId);
   while (restantes.length) {
     const ultimo = resultado[resultado.length - 1]!;
     let indice = 0;
@@ -1096,6 +1103,7 @@ function AssistantView({
   const [streetViews, setStreetViews] = useState<Record<string, StreetViewMeta>>({});
   const [streetViewSelecionado, setStreetViewSelecionado] = useState<{ lugar: Lugar; meta: StreetViewMeta; recomendacao?: Recomendacao } | null>(null);
   const [preferencias, setPreferencias] = useState<Preferencias | null>(null);
+  const [hospedagemBase, setHospedagemBase] = useState<{ nome: string; lat: number; lng: number } | null>(null);
   const [rota, setRota] = useState<Trecho[]>([]);
   const [enviando, setEnviando] = useState(false);
   useEffect(() => {
@@ -1134,30 +1142,46 @@ function AssistantView({
         interesses: preferencias?.interesses,
         ritmo: preferencias?.ritmo,
         hospedagem: preferencias?.hospedagem,
+        ...(hospedagemBase ? { hospedagemBase: `${hospedagemBase.nome} (${hospedagemBase.lat}, ${hospedagemBase.lng})` } : {}),
         roteiro: viagem?.roteiro.map((item) => `dia ${item.dia}: ${item.titulo}`).join(" | "),
       });
       setMensagens((atuais) => [...atuais, resposta]);
       const consultas = resposta.consultas?.length ? resposta.consultas : [pergunta];
       const destinoBusca = viagem?.destino || preferencias?.destino || "";
+      const contextoProximidade = hospedagemBase
+        ? ` próximo à hospedagem ${hospedagemBase.nome}`
+        : "";
+      const consultasBusca = consultas.map((consulta) => {
+        const consultaComBase = `${consulta}${contextoProximidade}`;
+        return destinoBusca && !consultaComBase.toLowerCase().includes(destinoBusca.toLowerCase())
+          ? `${consultaComBase} em ${destinoBusca}`
+          : consultaComBase;
+      });
+      let falhasBusca = 0;
       const resultados = await Promise.all(
-        consultas.slice(0, 3).map((consulta) =>
-          buscaTextual(
-            destinoBusca && !consulta.toLowerCase().includes(destinoBusca.toLowerCase())
-              ? `${consulta} em ${destinoBusca}`
-              : consulta,
-          )
-            .catch(() => ({ lugares: [], fallback: false })),
+        consultasBusca.slice(0, 3).map((consulta) =>
+          buscaTextual(consulta).catch(() => {
+            falhasBusca += 1;
+            return { lugares: [], fallback: false };
+          }),
         ),
       );
       const encontrados = resultados.flatMap((item) => item.lugares);
       let respostaFinal = resposta;
       if (encontrados.length) {
         const unicos = [...new Map(encontrados.map((item) => [item.placeId, item])).values()];
-        const organizados = ordenarLugares(unicos);
+        const proximos = hospedagemBase
+          ? unicos.filter((lugar) => distanciaKm(hospedagemBase, lugar) <= 20)
+          : unicos;
+        const organizados = ordenarLugares(proximos, hospedagemBase ?? undefined).slice(0, 12);
         setLugares(organizados);
         setStreetViews({});
-        if (organizados.length > 1) {
-          const trechos = await calcularRota(organizados.slice(0, 6).map((item) => ({ lat: item.lat, lng: item.lng, nome: item.nome }))).catch(() => []);
+        if (organizados.length && (organizados.length > 1 || hospedagemBase)) {
+          const pontosRota = [
+            ...(hospedagemBase ? [{ lat: hospedagemBase.lat, lng: hospedagemBase.lng, nome: hospedagemBase.nome }] : []),
+            ...organizados.slice(0, 6).map((item) => ({ lat: item.lat, lng: item.lng, nome: item.nome })),
+          ];
+          const trechos = await calcularRota(pontosRota).catch(() => []);
           setRota(trechos);
         } else {
           setRota([]);
@@ -1170,22 +1194,34 @@ function AssistantView({
           placeId: lugar.placeId,
           tipo: "lugar",
           titulo: lugar.nome,
-          resumo: `${lugar.categoria} · ${lugar.endereco || "localização consultada"}`,
-          justificativa: `Encontrado no Google Places para ${destinoBusca || "o destino informado"}; confira o Street View antes de adicionar.`,
+          resumo: `${lugar.categoria} · ${lugar.endereco || "localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""}`,
+          justificativa: `${hospedagemBase ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}. ` : ""}Encontrado no Google Places; confira o Street View antes de adicionar.`,
           evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
           categoria: "visitas",
           natureza: "observado",
+          ...(lugar.avaliacao ? { avaliacao: lugar.avaliacao } : {}),
+          ...(lugar.endereco ? { endereco: lugar.endereco } : {}),
+          ...(Number.isFinite(lugar.lat) ? { lat: lugar.lat } : {}),
+          ...(Number.isFinite(lugar.lng) ? { lng: lugar.lng } : {}),
+          categoriaLocal: lugar.categoria,
+          ...(hospedagemBase ? { distanciaKm: distanciaKm(hospedagemBase, lugar) } : {}),
           dia: Math.min(diasDeViagem, Math.floor(index / 3) + 1),
         }));
         respostaFinal = {
           ...resposta,
-          texto: `${resposta.texto} Encontrei locais reais no destino; confira o Street View ao lado para escolher.`,
-          recomendacoes: recomendacoesReais,
+          texto: organizados.length
+            ? `${resposta.texto} Encontrei ${organizados.length} locais reais${hospedagemBase ? ` em até 20 km da hospedagem ${hospedagemBase.nome}` : ""}. Veja a avaliação, abra o Street View e adicione somente os que desejar.`
+            : `Não encontrei pontos turísticos dentro de 20 km da hospedagem ${hospedagemBase?.nome ?? "selecionada"}. Vou evitar sugerir locais distantes; pesquise um bairro ou local específico no campo ao lado.`,
+          ...(recomendacoesReais.length ? { recomendacoes: recomendacoesReais } : {}),
         };
       } else {
-        const respostaSemRecomendacoes = { ...resposta };
-        delete respostaSemRecomendacoes.recomendacoes;
-        respostaFinal = respostaSemRecomendacoes;
+        respostaFinal = {
+          ...resposta,
+          texto: falhasBusca
+            ? `${resposta.texto} Não consegui consultar o Google Places agora. Tente novamente em alguns segundos ou use a busca ao lado.`
+            : `${resposta.texto} Não encontrei resultados reais para essa busca no destino informado. Tente citar uma praia, museu, bairro ou ponto turístico específico.`,
+        };
+        delete respostaFinal.recomendacoes;
       }
       setMensagens((atuais) => atuais.map((item) => item.id === resposta.id ? respostaFinal : item));
     } catch (error) {
@@ -1200,10 +1236,22 @@ function AssistantView({
     try {
       const destinoBusca = viagem?.destino || preferencias?.destino || "";
       const resultado = await buscaTextual(destinoBusca ? `${busca} em ${destinoBusca}` : busca);
-      const organizados = ordenarLugares(resultado.lugares);
+      const proximos = hospedagemBase
+        ? resultado.lugares.filter((lugar) => distanciaKm(hospedagemBase, lugar) <= 20)
+        : resultado.lugares;
+      const organizados = ordenarLugares(proximos, hospedagemBase ?? undefined);
       setLugares(organizados);
-      if (organizados.length > 1) {
-        const trechos = await calcularRota(organizados.slice(0, 6).map((item) => ({ lat: item.lat, lng: item.lng, nome: item.nome }))).catch(() => []);
+      if (!organizados.length) {
+        onToast(hospedagemBase
+          ? "Nenhum resultado ficou até 20 km da hospedagem escolhida. Pesquise outro local ou bairro próximo."
+          : "Nenhum local real foi encontrado para essa busca.");
+      }
+      if (organizados.length && (organizados.length > 1 || hospedagemBase)) {
+        const pontosRota = [
+          ...(hospedagemBase ? [{ lat: hospedagemBase.lat, lng: hospedagemBase.lng, nome: hospedagemBase.nome }] : []),
+          ...organizados.slice(0, 6).map((item) => ({ lat: item.lat, lng: item.lng, nome: item.nome })),
+        ];
+        const trechos = await calcularRota(pontosRota).catch(() => []);
         setRota(trechos);
       } else {
         setRota([]);
@@ -1232,11 +1280,11 @@ function AssistantView({
     }
   }
   function distanciaTexto(lugar: Lugar): string {
-    const referencia = lugares[0];
-    if (!referencia || referencia.placeId === lugar.placeId) return "Ponto de referência";
+    const referencia = hospedagemBase ?? lugares[0];
+    if (!referencia || ("placeId" in referencia && referencia.placeId === lugar.placeId)) return "Ponto de referência";
     const distancia = distanciaKm(referencia, lugar);
     const leitura = distancia <= 10 ? "perto" : distancia <= 30 ? "viável com deslocamento" : "longe; melhor separar em outro dia";
-    return `${distancia.toFixed(1)} km do primeiro ponto · ${leitura}`;
+    return `${distancia.toFixed(1)} km ${hospedagemBase ? "da hospedagem" : "do primeiro ponto"} · ${leitura}`;
   }
   function adicionarLugar(lugar: Lugar) {
     if (!streetViews[lugar.placeId]) {
@@ -1244,19 +1292,29 @@ function AssistantView({
       void revisarLugar(lugar);
       return;
     }
-    onAdicionar({
+    adicionarRecomendacaoControlada({
       id: `lugar-${lugar.placeId}`,
       tipo: "lugar",
       titulo: lugar.nome,
       resumo: `${lugar.categoria} · ${lugar.endereco}`,
       justificativa: "Lugar consultado no Google Places e escolhido por você.",
       evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
+      placeId: lugar.placeId,
+      ...(lugar.avaliacao ? { avaliacao: lugar.avaliacao } : {}),
+      ...(lugar.endereco ? { endereco: lugar.endereco } : {}),
+      lat: lugar.lat,
+      lng: lugar.lng,
+      categoriaLocal: lugar.categoria,
     });
   }
   function adicionarRecomendacaoControlada(recomendacao: Recomendacao) {
     if (limite != null && Number(recomendacao.valor || 0) > Math.max(0, limite - acumulado)) {
       onToast("Essa recomendação ultrapassa o saldo restante do seu orçamento.");
       return;
+    }
+    if (recomendacao.tipo === "hospedagem" && recomendacao.lat != null && recomendacao.lng != null) {
+      setHospedagemBase({ nome: recomendacao.titulo, lat: recomendacao.lat, lng: recomendacao.lng });
+      onToast(`Hospedagem escolhida. As próximas recomendações ficarão em até 20 km dela.`);
     }
     onAdicionar(recomendacao);
   }
@@ -1307,18 +1365,25 @@ function AssistantView({
                       <div>
                         <strong>{recomendacao.titulo}</strong>
                         <span>{recomendacao.resumo}</span>
-                        <small>{recomendacao.dia ? `Dia ${recomendacao.dia} · ` : ""}{recomendacao.justificativa} · {recomendacao.evidencia.fonte}{recomendacao.valor ? ` · ${brl(recomendacao.valor)}` : ""}</small>
+                        <small>
+                          {recomendacao.avaliacao ? `★ ${recomendacao.avaliacao.toFixed(1)} · ` : ""}
+                          {recomendacao.categoriaLocal ? `${recomendacao.categoriaLocal} · ` : ""}
+                          {recomendacao.dia ? `Dia ${recomendacao.dia} · ` : ""}
+                          {recomendacao.distanciaKm != null ? `${recomendacao.distanciaKm.toFixed(1)} km da hospedagem · ` : ""}
+                          {recomendacao.justificativa} · {recomendacao.evidencia.fonte}
+                          {recomendacao.valor ? ` · ${brl(recomendacao.valor)}` : ""}
+                        </small>
                       </div>
-                      <button
+                      <button type="button" className="recommendation-action"
                         onClick={() => {
                           const lugar = recomendacao.placeId
                             ? lugares.find((item) => item.placeId === recomendacao.placeId)
                             : undefined;
                           if (lugar) void revisarLugar(lugar, recomendacao);
-                          else adicionarRecomendacaoControlada(recomendacao);
+                          else onToast("Este local não está mais disponível. Faça a busca novamente para consultar o Street View.");
                         }}
                       >
-                        <Plus size={15} />
+                        <Eye size={15} /> Visualizar
                       </button>
                     </div>
                   ))}
@@ -1386,7 +1451,7 @@ function AssistantView({
                       <span>
                         <strong>{lugar.nome}</strong>
                         <small>
-                          {lugar.categoria} · {distanciaTexto(lugar)}
+                          {lugar.categoria}{lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""} · {distanciaTexto(lugar)}
                         </small>
                       </span>
                       <div className="place-actions">
@@ -1453,7 +1518,12 @@ function AssistantView({
             <h3>{streetViewSelecionado.lugar.nome}</h3>
             {streetViewSelecionado.meta.imagemUrl ? <img className="street-view-modal-image" src={streetViewSelecionado.meta.imagemUrl} alt={`Street View de ${streetViewSelecionado.lugar.nome}`} /> : <iframe className="street-view-frame" src={streetViewSelecionado.meta.mapaUrl} title={`Street View de ${streetViewSelecionado.lugar.nome}`} loading="lazy" />}
             <p>{streetViewSelecionado.lugar.endereco || "Local consultado no mapa"}</p>
-            <div className="offer-modal-actions"><a className="secondary-button" href={streetViewSelecionado.meta.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Maps</a><button className="primary-button" type="button" onClick={() => { onAdicionar({ id: `lugar-${streetViewSelecionado.lugar.placeId}`, placeId: streetViewSelecionado.lugar.placeId, tipo: "lugar", titulo: streetViewSelecionado.lugar.nome, resumo: `${streetViewSelecionado.lugar.categoria} · ${streetViewSelecionado.lugar.endereco}`, justificativa: "Lugar consultado no Google Places e conferido no Street View.", evidencia: { fonte: streetViewSelecionado.lugar.fonte, consultadoEm: streetViewSelecionado.lugar.consultadoEm }, ...(streetViewSelecionado.recomendacao?.dia ? { dia: streetViewSelecionado.recomendacao.dia } : {}) }); setStreetViewSelecionado(null); }}><Plus size={15} /> Adicionar ao roteiro</button></div>
+            <div className="street-view-details">
+              <span>{streetViewSelecionado.lugar.categoria}</span>
+              {streetViewSelecionado.lugar.avaliacao ? <span>★ {streetViewSelecionado.lugar.avaliacao.toFixed(1)} no Google</span> : <span>Avaliação não informada</span>}
+              {streetViewSelecionado.lugar.aberto != null && <span>{streetViewSelecionado.lugar.aberto ? "Aberto agora" : "Fechado agora"}</span>}
+            </div>
+            <div className="offer-modal-actions"><a className="secondary-button" href={streetViewSelecionado.meta.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Maps</a><button className="primary-button" type="button" onClick={() => { adicionarRecomendacaoControlada({ id: `lugar-${streetViewSelecionado.lugar.placeId}`, placeId: streetViewSelecionado.lugar.placeId, tipo: "lugar", titulo: streetViewSelecionado.lugar.nome, resumo: `${streetViewSelecionado.lugar.categoria} · ${streetViewSelecionado.lugar.endereco}`, justificativa: "Lugar consultado no Google Places e conferido no Street View.", evidencia: { fonte: streetViewSelecionado.lugar.fonte, consultadoEm: streetViewSelecionado.lugar.consultadoEm }, ...(streetViewSelecionado.lugar.avaliacao ? { avaliacao: streetViewSelecionado.lugar.avaliacao } : {}), endereco: streetViewSelecionado.lugar.endereco, lat: streetViewSelecionado.lugar.lat, lng: streetViewSelecionado.lugar.lng, categoriaLocal: streetViewSelecionado.lugar.categoria, ...(streetViewSelecionado.recomendacao?.dia ? { dia: streetViewSelecionado.recomendacao.dia } : {}) }); setStreetViewSelecionado(null); }}><Plus size={15} /> Adicionar ao roteiro</button></div>
           </div>
         </div>
       )}

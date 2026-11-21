@@ -172,6 +172,12 @@ export interface Recomendacao {
   evidencia: { fonte: string; consultadoEm: string };
   consulta?: string;
   placeId?: string;
+  avaliacao?: number;
+  endereco?: string;
+  lat?: number;
+  lng?: number;
+  categoriaLocal?: string;
+  distanciaKm?: number;
   dia?: number;
   duracaoMinutos?: number;
   valor?: number;

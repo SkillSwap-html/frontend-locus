@@ -15,6 +15,13 @@ export interface UsuarioAdmin {
   tipoUsuario: string;
 }
 
+export interface DashboardAdmin {
+  usuarios: number;
+  viagens: number;
+  destinosUnicos: number;
+  destinos: { destino: string; quantidade: number }[];
+}
+
 const params = () => ({ usuarioSolicitanteId: backendUserId() });
 
 export function listarAdministradores(): Promise<AdminEmail[]> {
@@ -31,6 +38,10 @@ export function removerAdministrador(email: string): Promise<void> {
 
 export function listarUsuariosAdmin(): Promise<UsuarioAdmin[]> {
   return chamar(() => api.get<UsuarioAdmin[]>("/api/admin/usuarios", { params: params() }));
+}
+
+export function listarDashboardAdmin(): Promise<DashboardAdmin> {
+  return chamar(() => api.get<DashboardAdmin>("/api/admin/dashboard", { params: params() }));
 }
 
 export function alterarTipoUsuario(id: number, tipoUsuario: string): Promise<UsuarioAdmin> {

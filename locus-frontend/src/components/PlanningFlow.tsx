@@ -68,6 +68,7 @@ function recomendacaoOferta(
   valor: number,
   fonte: string,
   categoria: CategoriaOrcamento,
+  localizacao?: { lat?: number; lng?: number; endereco?: string },
 ): Recomendacao {
   return {
     id: `${tipo}-${Date.now()}`,
@@ -77,6 +78,9 @@ function recomendacaoOferta(
     justificativa: "Escolhida por você na consulta de ofertas.",
     evidencia: { fonte, consultadoEm: new Date().toISOString() },
     ...(valor > 0 ? { valor } : {}),
+    ...(localizacao?.lat != null ? { lat: localizacao.lat } : {}),
+    ...(localizacao?.lng != null ? { lng: localizacao.lng } : {}),
+    ...(localizacao?.endereco ? { endereco: localizacao.endereco } : {}),
     categoria,
     natureza: fonte.includes("simulado") ? "simulado" : "observado",
   };
@@ -158,7 +162,11 @@ export function PlanningFlow({
       onAdicionar(recomendacaoOferta("voo", `Passagem ${voo.origem} → ${voo.destino}`, `${voo.companhia} · ${dinheiro(voo.preco, voo.moeda)}`, voo.preco, voo.fonte, "passagem"));
     } else {
       const hotel = ofertaSelecionada.valor;
-      onAdicionar(recomendacaoOferta("hospedagem", hotel.hotel, `${hotel.quarto} · ${hotel.preco ? dinheiro(hotel.preco, hotel.moeda) : "Oferta consultada"}`, hotel.preco, hotel.fonte, "hospedagem"));
+      onAdicionar(recomendacaoOferta("hospedagem", hotel.hotel, `${hotel.quarto} · ${hotel.preco ? dinheiro(hotel.preco, hotel.moeda) : "Oferta consultada"}`, hotel.preco, hotel.fonte, "hospedagem", {
+        ...(hotel.latitude != null ? { lat: hotel.latitude } : {}),
+        ...(hotel.longitude != null ? { lng: hotel.longitude } : {}),
+        endereco: hotel.hotel,
+      }));
     }
     setOfertaSelecionada(null);
     onToast("Oferta adicionada ao roteiro. O total foi atualizado.");

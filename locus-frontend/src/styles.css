@@ -360,9 +360,26 @@
 .admin-row small { color: #8f8b84; font-size: 9px; }
 .danger-icon { color: #ba6f62; }
 .count-pill { padding: 4px 8px; border-radius: 12px; background: #f3e5dd; color: #a46855; font-size: 10px; }
+.admin-analytics { display: grid; gap: 12px; }
+.admin-analytics .section-heading { align-items: flex-start; }
+.admin-analytics h2 { margin-bottom: 4px; }
+.admin-filter { display: grid; gap: 5px; color: #7d897f; font-size: 10px; white-space: nowrap; }
+.admin-filter select { min-height: 34px; border: 1px solid #e0dcd4; border-radius: 8px; padding: 0 9px; background: #fff; color: var(--locus-deep); }
+.admin-chart-layout { display: grid; grid-template-columns: minmax(280px, 1.15fr) minmax(220px, .85fr); gap: 14px; align-items: center; }
+.admin-pie-chart { min-height: 270px; }
+.admin-destination-list { display: grid; gap: 8px; }
+.admin-destination-row { display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid #eee8df; border-radius: 9px; background: #fffefa; color: var(--locus-deep); font-size: 11px; }
+.admin-destination-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-destination-row > span:last-child { color: #8c958c; }
+.admin-destination-dot { width: 8px; height: 8px; border-radius: 50%; }
+.admin-chart-empty { padding: 30px 15px; border: 1px dashed #ded7ce; border-radius: 10px; color: #8c958c; text-align: center; font-size: 11px; }
+.recommendation-action { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #d5e0d5; border-radius: 8px; padding: 7px 9px; background: #eef5ed; color: #35644f; font-size: 10px; white-space: nowrap; }
+.street-view-details { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 14px; }
+.street-view-details span { padding: 5px 8px; border-radius: 20px; background: #f2eee7; color: #718078; font-size: 10px; }
 @media (max-width: 760px) {
   .admin-grid { grid-template-columns: 1fr; }
   .admin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-chart-layout { grid-template-columns: 1fr; }
   .form-actions { align-items: stretch; flex-direction: column; }
   .planning-budget { align-items: flex-start; flex-direction: column; }
 }
