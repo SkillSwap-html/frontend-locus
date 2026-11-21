@@ -1,4 +1,4 @@
-import type { Lugar, MensagemAssistente, OfertaHotel, OfertaVoo } from "@/types";
+import type { CategoriaOrcamento, Lugar, MensagemAssistente, OfertaHotel, OfertaVoo } from "@/types";
 import { api, chamar } from "./api";
 import { uid } from "./ids";
 
@@ -120,6 +120,7 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
       ...(Number.isFinite(Number(value.lng)) ? { lng: Number(value.lng) } : {}),
       ...(texto(value.categoriaLocal) ? { categoriaLocal: texto(value.categoriaLocal) } : {}),
       ...(Number.isInteger(Number(value.dia)) ? { dia: Number(value.dia) } : {}),
+      ...(texto(value.horario) ? { horario: texto(value.horario) } : {}),
       ...(Number.isInteger(Number(value.duracaoMinutos)) ? { duracaoMinutos: Number(value.duracaoMinutos) } : {}),
       ...(Number.isFinite(Number(value.valor)) ? { valor: Number(value.valor) } : {}),
       ...(categoria ? { categoria } : {}),
@@ -128,7 +129,25 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
   });
 }
 
-function interpretarAssistente(raw: unknown): Pick<MensagemAssistente, "texto" | "recomendacoes" | "consultas" | "etapa"> {
+function normalizarOrcamentoSugerido(raw: unknown): MensagemAssistente["orcamentoSugerido"] {
+  const value = objeto(raw);
+  const categorias: CategoriaOrcamento[] = [
+    "passagem",
+    "hospedagem",
+    "visitas",
+    "alimentacao",
+    "transporteLocal",
+    "extras",
+  ];
+  const resultado: Partial<Record<CategoriaOrcamento, number>> = {};
+  categorias.forEach((categoria) => {
+    const valor = Number(value[categoria]);
+    if (Number.isFinite(valor) && valor > 0) resultado[categoria] = Math.round(valor * 100) / 100;
+  });
+  return Object.keys(resultado).length ? resultado : undefined;
+}
+
+function interpretarAssistente(raw: unknown): Pick<MensagemAssistente, "texto" | "recomendacoes" | "orcamentoSugerido" | "consultas" | "etapa"> {
   const textoResposta = textoGemini(raw);
   const objetoResposta = jsonDaResposta(textoResposta);
   const consultas = Array.isArray(objetoResposta.consultas)
@@ -136,10 +155,12 @@ function interpretarAssistente(raw: unknown): Pick<MensagemAssistente, "texto" |
     : [];
   const etapa = texto(objetoResposta.etapa) as MensagemAssistente["etapa"];
   const recomendacoes = normalizarRecomendacoes(objetoResposta.recomendacoes);
+  const orcamentoSugerido = normalizarOrcamentoSugerido(objetoResposta.orcamentoSugerido);
   return {
     texto: texto(objetoResposta.resposta) || textoResposta || "Recebi uma resposta vazia. Tente reformular a pergunta.",
     ...(consultas.length ? { consultas } : {}),
     ...(recomendacoes?.length ? { recomendacoes } : {}),
+    ...(orcamentoSugerido ? { orcamentoSugerido } : {}),
     ...(etapa ? { etapa } : {}),
   };
 }
@@ -148,6 +169,7 @@ type ContextoAssistente = {
   modoOrcamento?: "fixo" | "aberto" | undefined;
   limite?: number | undefined;
   acumulado?: number | undefined;
+  orcamentoDetalhado?: string | undefined;
   idade?: number | undefined;
   origem?: string | undefined;
   destino?: string | undefined;
@@ -181,13 +203,26 @@ export function respostaLocalAssistente(textoPergunta: string, contexto?: Contex
   const limite = contexto?.limite == null
     ? "Orçamento aberto: vou somar cada escolha."
     : `Saldo disponível aproximado: R$ ${Math.max(0, contexto.limite - (contexto.acumulado ?? 0)).toFixed(2)}.`;
+  const valores = contexto?.orcamentoDetalhado ? ` ${contexto.orcamentoDetalhado}` : "";
+  const querOrcamento = /orçamento|orcamento|quanto.*gasto|quanto.*levar|valor.*viagem|gastos?|custos?|preço total|preco total/.test(pergunta);
+  const orcamentoSugerido = querOrcamento && destino
+    ? {
+        passagem: contexto?.transporte === "onibus" ? 900 : contexto?.transporte === "carro" || contexto?.transporte === "moto" ? 650 : 2200,
+        hospedagem: 2800,
+        visitas: 600,
+        alimentacao: 1200,
+        transporteLocal: 450,
+        extras: 350,
+      }
+    : undefined;
   return {
     id: uid(),
     autor: "assistente",
     texto: destino
-      ? `Entendi. Vou buscar opções reais em ${destino}, organizar por proximidade e separar as sugestões por dia. ${limite} Confira os resultados e o Street View antes de adicionar.`
+      ? `Entendi. Vou buscar opções reais em ${destino}, organizar por proximidade e separar as sugestões por dia. ${limite}${valores} Confira os resultados e o Street View antes de adicionar.`
       : "Para montar recomendações reais, preciso saber qual é o destino da viagem. Informe a cidade e o país no chat ou crie uma viagem primeiro.",
     ...(consultas.length ? { consultas } : {}),
+    ...(orcamentoSugerido ? { orcamentoSugerido } : {}),
     etapa: querPassagem ? "passagem" : querHospedagem ? "hospedagem" : "roteiro",
     criadaEm: new Date().toISOString(),
   };
@@ -224,9 +259,10 @@ export async function perguntarGemini(
         contexto.hospedagem ? `Hospedagem preferida: ${contexto.hospedagem}.` : "",
         contexto.hospedagemBase ? `Base de proximidade obrigatória: ${contexto.hospedagemBase}. Recomende locais turísticos próximos dessa hospedagem.` : "",
         contexto.roteiro ? `Itens já adicionados ao roteiro: ${contexto.roteiro}.` : "",
+        contexto.orcamentoDetalhado ? `Resumo por categoria: ${contexto.orcamentoDetalhado}. Ajude a pessoa a definir e revisar os valores de passagem, hospedagem, visitas, alimentação, transporte local e extras.` : "",
       ].filter(Boolean).join(" ")
     : "";
-  const regras = "Não repita saudações nem perguntas já respondidas. Recomende somente locais dentro do destino obrigatório; para locais nomeados, gere consultas ao Google Places e deixe a confirmação dos dados para a busca real. Quando houver hospedagem-base, priorize locais em até 20 km dela e informe que o sistema vai conferir a distância e a rota.";
+  const regras = "Não repita saudações nem perguntas já respondidas. Recomende somente locais dentro do destino obrigatório; para locais nomeados, gere consultas ao Google Places e deixe a confirmação dos dados para a busca real. Quando houver hospedagem-base, priorize locais em até 20 km dela e informe que o sistema vai conferir a distância e a rota. Quando a pessoa perguntar sobre orçamento, mostre o total, o acumulado e uma sugestão separada por categoria. Nunca ultrapasse o limite fixo; em orçamento aberto, some cada escolha e explique o valor estimado que ainda falta para alimentação, transporte local e extras.";
   const promptCompleto = [financeiro, viagem, regras, historicoTexto, `Usuário: ${textoPergunta}`]
     .filter(Boolean)
     .join("\n\n");
@@ -238,7 +274,7 @@ export async function perguntarGemini(
       api.post<Json>(`${BASE}/gemini/conteudo`, { prompt }, { timeout: 30000 }),
     );
     const interpretada = interpretarAssistente(raw);
-    if (interpretada.texto !== "Recebi uma resposta vazia. Tente reformular a pergunta." || interpretada.consultas?.length) {
+    if (interpretada.texto !== "Recebi uma resposta vazia. Tente reformular a pergunta." || interpretada.consultas?.length || interpretada.orcamentoSugerido) {
       return {
         id: uid(),
         autor: "assistente",

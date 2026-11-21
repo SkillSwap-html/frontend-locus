@@ -4,8 +4,11 @@ import { getIdToken } from "./auth";
 /** Single Axios instance for the Spring Boot backend. */
 const backendPublicado = "https://backend-locus-production.up.railway.app";
 const backendConfigurado = (import.meta.env["VITE_API_URL"] as string | undefined)?.trim();
+const limparConfiguracao = (valor: string) => valor
+  .replace(/^['"]|['"]$/g, "")
+  .replace(/\\([:/])/g, "$1");
 export const API_URL = (
-  backendConfigurado || (import.meta.env.PROD ? backendPublicado : "http://localhost:8080")
+  limparConfiguracao(backendConfigurado || (import.meta.env.PROD ? backendPublicado : "http://localhost:8080"))
 ).replace(/\/$/, "");
 
 export const api = axios.create({

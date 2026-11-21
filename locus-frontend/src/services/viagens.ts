@@ -41,6 +41,17 @@ function categoriaOrcamento(value: unknown): CategoriaOrcamento {
   } as Record<string, CategoriaOrcamento>)[normalizada] ?? "extras";
 }
 
+function categoriaBackend(categoria: CategoriaOrcamento): string {
+  return ({
+    passagem: "PASSAGEM",
+    hospedagem: "HOSPEDAGEM",
+    visitas: "VISITAS",
+    alimentacao: "ALIMENTACAO",
+    transporteLocal: "TRANSPORTE_LOCAL",
+    extras: "EXTRAS",
+  } as Record<CategoriaOrcamento, string>)[categoria];
+}
+
 function transporte(modo: unknown): Viagem["transporte"] {
   const value = String(modo ?? "").toUpperCase();
   return (
@@ -243,6 +254,42 @@ export async function atualizarViagem(_id: string, _parcial: Partial<Viagem>): P
     { params: { usuarioSolicitanteId: backendUserId() } },
   ));
   return hidratar(raw);
+}
+
+export async function definirLimitesOrcamento(
+  viagemId: string,
+  limites: Partial<Record<CategoriaOrcamento, number>>,
+): Promise<Viagem> {
+  const usuarioId = backendUserId();
+  const existentes = await chamar<Array<Record<string, unknown>>>(() =>
+    api.get(`/api/limites-orcamento/viagem/${viagemId}`, {
+      params: { usuarioSolicitanteId: usuarioId },
+    }),
+  );
+  const porCategoria = new Map(
+    existentes.map((item) => [categoriaOrcamento(item["categoria"]), String(item["id"] ?? "")]),
+  );
+  await Promise.all(
+    (Object.entries(limites) as [CategoriaOrcamento, number][])
+      .filter(([, valor]) => Number.isFinite(Number(valor)) && Number(valor) > 0)
+      .map(async ([categoria, valor]) => {
+        const limiteId = porCategoria.get(categoria);
+        if (limiteId) {
+          await chamar(() => api.put(
+            `/api/limites-orcamento/${limiteId}`,
+            { valorLimite: Number(valor), confirmacaoUsuario: true },
+            { params: { usuarioSolicitanteId: usuarioId } },
+          ));
+          return;
+        }
+        await chamar(() => api.post(
+          `/api/limites-orcamento/viagem/${viagemId}`,
+          { categoria: categoriaBackend(categoria), valorLimite: Number(valor) },
+          { params: { usuarioSolicitanteId: usuarioId } },
+        ));
+      }),
+  );
+  return obterViagem(viagemId);
 }
 
 export async function salvarPreferencias(preferencias: Preferencias): Promise<void> {

@@ -199,6 +199,7 @@ export interface Recomendacao {
   categoriaLocal?: string;
   distanciaKm?: number;
   dia?: number;
+  horario?: string;
   duracaoMinutos?: number;
   valor?: number;
   categoria?: CategoriaOrcamento;
@@ -211,6 +212,7 @@ export interface MensagemAssistente {
   autor: "usuario" | "assistente";
   texto: string;
   recomendacoes?: Recomendacao[];
+  orcamentoSugerido?: Partial<Record<CategoriaOrcamento, number>>;
   consultas?: string[];
   etapa?: "passagem" | "hospedagem" | "roteiro" | "geral";
   incompleta?: boolean;

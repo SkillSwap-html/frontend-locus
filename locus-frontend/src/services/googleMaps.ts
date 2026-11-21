@@ -7,6 +7,12 @@ type GoogleMapsNamespace = {
       addListener(event: string, callback: () => void): { remove(): void };
       getStatus?: () => string;
     };
+    StreetViewService: new () => {
+      getPanorama(
+        request: Record<string, unknown>,
+        callback: (data: { location?: { latLng?: { lat: number; lng: number } } } | null, status: string) => void,
+      ): void;
+    };
     StreetViewStatus?: { OK?: string };
   };
 };
@@ -14,7 +20,10 @@ type GoogleMapsNamespace = {
 let carregamento: Promise<GoogleMapsNamespace> | null = null;
 
 export function carregarGoogleMaps(): Promise<GoogleMapsNamespace> {
-  const chave = String(import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "").trim();
+  const chave = String(import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "")
+    .trim()
+    .replace(/^['"]|['"]$/g, "")
+    .replace(/\\([:/])/g, "$1");
   if (!chave) {
     return Promise.reject(new Error("Configure a chave do Google Maps JavaScript API no frontend."));
   }

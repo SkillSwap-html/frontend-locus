@@ -49,7 +49,7 @@ import { cancelarSimulacao, confirmarRoteiro, listarReservas } from "@/services/
 import { baixarRelatorio, listarRelatorios } from "@/services/relatorios";
 import { adicionarRecomendacao, compararVersoes, criarLinkCompartilhamento, criarRoteiroInicial, criarVersao, editarItemRoteiro, excluirItemOrcamento, excluirItemRoteiro, restaurarVersao } from "@/services/roteiros";
 import { limparUsuarioBackend, sincronizarUsuario } from "@/services/usuarioBackend";
-import { criarViagem, listarNotificacoes, listarViagens, marcarLida, marcarTodasComoLidas, obterViagem } from "@/services/viagens";
+import { criarViagem, definirLimitesOrcamento, listarNotificacoes, listarViagens, marcarLida, marcarTodasComoLidas, obterViagem } from "@/services/viagens";
 import { MapPreview } from "@/components/MapPreview";
 import { GoogleStreetView } from "@/components/GoogleStreetView";
 import { AdminView } from "@/components/AdminView";
@@ -98,6 +98,7 @@ const dataPadrao = {
   limiteTotal: "",
   mochilao: false,
 };
+const HORARIOS_ROTEIRO = ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00"];
 
 function campo<T = unknown>(obj: unknown, chave: string): T | undefined {
   if (!obj || typeof obj !== "object") return undefined;
@@ -170,6 +171,19 @@ function lugarEhHospedagem(lugar: Lugar): boolean {
   const textoLugar = [lugar.nome, lugar.categoria, ...(lugar.tipos ?? [])].join(" ").toLowerCase();
   return /hotel|hospedagem|pousada|hostel|resort|alojamento|lodging/.test(textoLugar);
 }
+function estimativaLocal(lugar: Lugar): { categoria: CategoriaOrcamento; valor: number; rotulo: string } {
+  const textoLugar = [lugar.nome, lugar.categoria, ...(lugar.tipos ?? [])].join(" ").toLowerCase();
+  if (/restaurant|restaurante|cafe|café|bar|comida|gastronomia/.test(textoLugar)) {
+    return { categoria: "alimentacao", valor: 90, rotulo: "estimativa de alimentação por pessoa" };
+  }
+  if (/museum|museu|tourist|turíst|historical|histór|aquarium|aquário/.test(textoLugar)) {
+    return { categoria: "visitas", valor: 45, rotulo: "estimativa de ingresso" };
+  }
+  if (/beach|praia|park|parque|natural|praça|praca/.test(textoLugar)) {
+    return { categoria: "visitas", valor: 0, rotulo: "gratuito ou preço não informado" };
+  }
+  return { categoria: "visitas", valor: 30, rotulo: "estimativa de visita" };
+}
 function consultasParaLocais(pergunta: string, destino: string): string[] {
   if (!destino) return [];
   const normalizada = pergunta.toLowerCase();
@@ -222,6 +236,7 @@ function App() {
   const [carregando, setCarregando] = useState(false);
   const [notificacoes, setNotificacoes] = useState<Notificacao[]>([]);
   const [notificacoesAbertas, setNotificacoesAbertas] = useState(false);
+  const [diaAssistente, setDiaAssistente] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     void usuarioAtual().then(setUsuario);
@@ -341,11 +356,32 @@ function App() {
       setCarregando(false);
     }
   }
+  async function aplicarSugestaoOrcamento(sugestao: Partial<Record<CategoriaOrcamento, number>>) {
+    if (!selecionada) {
+      setToast("Abra uma viagem para salvar os valores sugeridos no orçamento.");
+      return;
+    }
+    setCarregando(true);
+    try {
+      const atualizada = await definirLimitesOrcamento(selecionada.id, sugestao);
+      setSelecionada(atualizada);
+      setViagens((atuais) => atuais.map((item) => item.id === atualizada.id ? atualizada : item));
+      setToast("Valores sugeridos pela IA salvos nas categorias do orçamento.");
+    } catch (error) {
+      setToast(normalizarErro(error).message);
+    } finally {
+      setCarregando(false);
+    }
+  }
   async function removerDoRoteiro(item: ItemRoteiro) {
     if (!selecionada) return;
     setCarregando(true);
     try {
       await excluirItemRoteiro(item);
+      const gastoRelacionado = (selecionada.orcamento ?? []).filter((gasto) =>
+        gasto.descricao === item.titulo && (gasto.categoria === "visitas" || gasto.categoria === "alimentacao"),
+      );
+      await Promise.all(gastoRelacionado.map((gasto) => excluirItemOrcamento(gasto)));
       const atualizada = await obterViagem(selecionada.id);
       setSelecionada(atualizada);
       setViagens((atuais) => atuais.map((itemViagem) => itemViagem.id === atualizada.id ? atualizada : itemViagem));
@@ -377,6 +413,22 @@ function App() {
     const horarioInicio = window.prompt("Horário de início (HH:MM)", item.inicio)?.trim();
     if (!horarioInicio || !/^([01]\d|2[0-3]):[0-5]\d$/.test(horarioInicio)) {
       setToast("Informe o horário no formato HH:MM.");
+      return;
+    }
+    const [horaEditada, minutoEditado] = horarioInicio.split(":").map(Number);
+    const minutosEditados = horaEditada * 60 + minutoEditado;
+    if ((minutosEditados - 8 * 60) % 120 !== 0) {
+      setToast("Escolha um horário com intervalo de 2 horas: 08:00, 10:00, 12:00, 14:00, 16:00 ou 18:00.");
+      return;
+    }
+    const conflitoDeEspacamento = (selecionada?.roteiro ?? [])
+      .filter((outro) => outro.id !== item.id && outro.dia === item.dia)
+      .some((outro) => {
+        const [horaOutro, minutoOutro] = outro.inicio.split(":").map(Number);
+        return Math.abs(minutosEditados - (horaOutro * 60 + minutoOutro)) < 120;
+      });
+    if (conflitoDeEspacamento) {
+      setToast("Mantenha pelo menos 2 horas entre o início de uma atividade e outra.");
       return;
     }
     const duracaoTexto = window.prompt("Duração em minutos", String(item.duracaoMin));
@@ -539,7 +591,7 @@ function App() {
               usuario={usuario}
               relatorios={relatorios}
               onNova={() => navegar("nova")}
-              onIA={() => navegar("ia")}
+              onIA={() => { setDiaAssistente(undefined); navegar("ia"); }}
               onAbrir={abrirViagem}
               onPerfil={() => navegar("perfil")}
             />
@@ -571,7 +623,7 @@ function App() {
               viagem={selecionada}
               carregando={carregando}
               onVoltar={() => navegar("inicio")}
-              onIA={() => navegar("ia")}
+              onIA={(dia) => { setDiaAssistente(dia); navegar("ia"); }}
               onConfirmar={() => selecionada && void confirmar(selecionada)}
               onRemoverItem={(item) => void removerDoRoteiro(item)}
               onRemoverOrcamento={(item) => void removerDoOrcamento(item)}
@@ -587,9 +639,11 @@ function App() {
           {view === "ia" && (
             <AssistantView
               viagem={selecionada}
+              diaInicial={diaAssistente}
               onVoltar={() => navegar(selecionada ? "viagem" : "inicio")}
               onToast={setToast}
               onAdicionar={(recomendacao) => void adicionarAoRoteiro(recomendacao)}
+              onAplicarOrcamento={(sugestao) => void aplicarSugestaoOrcamento(sugestao)}
             />
           )}
           {view === "perfil" && (
@@ -1097,7 +1151,7 @@ function TripView({
 }: {
   viagem: Viagem | null;
   onVoltar: () => void;
-  onIA: () => void;
+  onIA: (dia?: number) => void;
   onConfirmar: () => void;
   onRemoverItem: (item: ItemRoteiro) => void;
   onRemoverOrcamento: (item: ItemOrcamento) => void;
@@ -1127,7 +1181,12 @@ function TripView({
   if (!viagem) return <EmptyTrip onNova={onVoltar} />;
   const viagemAtual = viagem;
   const itens = viagemAtual.roteiro ?? [];
-  const dias = [...new Set(itens.map((item) => item.dia))];
+  const diasDaViagem = viagemAtual.dataInicio && viagemAtual.dataFim
+    ? Math.max(1, Math.floor((new Date(`${viagemAtual.dataFim}T12:00:00`).getTime() - new Date(`${viagemAtual.dataInicio}T12:00:00`).getTime()) / 86400000) + 1)
+    : 1;
+  const maiorDiaComItem = itens.reduce((maior, item) => Math.max(maior, item.dia), 0);
+  const totalDias = Math.max(diasDaViagem, maiorDiaComItem);
+  const dias = Array.from({ length: totalDias }, (_, index) => index + 1);
   const resumo = resumirOrcamento(
     itensParaResumo(viagemAtual),
     viagemAtual.limites ?? LIMITES,
@@ -1270,8 +1329,8 @@ function TripView({
                       .map((item) => (
                           <ItineraryItem key={item.id} item={item} onRemover={() => onRemoverItem(item)} onEditar={() => onEditarItem(item)} />
                       ))}
-                    <button className="add-item-button" onClick={onIA}>
-                      <Plus size={16} /> Pedir uma sugestão para este dia
+                    <button className="add-item-button" onClick={() => onIA(dia)}>
+                      <Plus size={16} /> Adicionar atividade no Dia {dia}
                     </button>
                   </div>
                 </div>
@@ -1300,14 +1359,18 @@ function TripView({
 
 function AssistantView({
   viagem,
+  diaInicial,
   onVoltar,
   onToast,
   onAdicionar,
+  onAplicarOrcamento,
 }: {
   viagem: Viagem | null;
+  diaInicial?: number;
   onVoltar: () => void;
   onToast: (value: string) => void;
   onAdicionar: (recomendacao: Recomendacao) => void;
+  onAplicarOrcamento: (sugestao: Partial<Record<CategoriaOrcamento, number>>) => void;
 }) {
   const [mensagens, setMensagens] = useState<MensagemAssistente[]>([
     {
@@ -1327,10 +1390,15 @@ function AssistantView({
   const [rota, setRota] = useState<Trecho[]>([]);
   const [enviando, setEnviando] = useState(false);
   const [diasSelecionados, setDiasSelecionados] = useState<Record<string, number>>({});
+  const [horariosSelecionados, setHorariosSelecionados] = useState<Record<string, string>>({});
   const [diasLugares, setDiasLugares] = useState<Record<string, number>>({});
   useEffect(() => {
     void lerPreferenciasBackend().then(setPreferencias).catch(() => undefined);
   }, []);
+  useEffect(() => {
+    if (diaInicial == null) return;
+    setDiasSelecionados((atuais) => ({ ...atuais, __novo__: diaInicial }));
+  }, [diaInicial]);
   const modoOrcamento: ModoOrcamento = viagem?.modoOrcamento ?? preferencias?.modoOrcamento ?? "aberto";
   const limiteViagem = viagem?.orcamentoTotal ?? (viagem ? Object.values(viagem.limites).reduce((total, valor) => total + Number(valor || 0), 0) : 0);
   const limitePreferencias = Number(preferencias?.limites.extras || 0);
@@ -1338,11 +1406,57 @@ function AssistantView({
     ? (limiteViagem > 0 ? limiteViagem : limitePreferencias > 0 ? limitePreferencias : undefined)
     : undefined;
   const acumulado = viagem ? totalViagem(viagem) : 0;
+  const resumoFinanceiro = viagem
+    ? resumirOrcamento(
+        itensParaResumo(viagem),
+        viagem.limites ?? LIMITES,
+        modoOrcamento,
+        viagem.orcamentoTotal,
+      )
+    : null;
+  const orcamentoDetalhado = resumoFinanceiro
+    ? resumoFinanceiro.categorias
+      .map((item) => `${rotuloCategoria(item.categoria)}: R$ ${item.subtotal.toFixed(2)}${item.limite > 0 ? ` de R$ ${item.limite.toFixed(2)}` : ""}`)
+      .join("; ")
+    : "";
   const totalDias = viagem?.dataInicio && viagem?.dataFim
     ? Math.max(1, Math.floor((new Date(`${viagem.dataFim}T12:00:00`).getTime() - new Date(`${viagem.dataInicio}T12:00:00`).getTime()) / 86400000) + 1)
     : 1;
   function diaDaRecomendacao(recomendacao: Recomendacao): number {
-    return Math.max(1, Math.min(totalDias, diasSelecionados[recomendacao.id] ?? recomendacao.dia ?? 1));
+    return Math.max(1, Math.min(totalDias, diasSelecionados[recomendacao.id] ?? recomendacao.dia ?? diasSelecionados.__novo__ ?? 1));
+  }
+  function horarioDaRecomendacao(recomendacao: Recomendacao): string {
+    return horariosSelecionados[recomendacao.id] ?? recomendacao.horario ?? "08:00";
+  }
+  function sugestaoOrcamento(): Partial<Record<CategoriaOrcamento, number>> {
+    const dias = Math.max(1, totalDias);
+    const noites = Math.max(1, dias - 1);
+    const modoTransporte = viagem?.transporte ?? preferencias?.transporte ?? "aviao";
+    const base: Record<CategoriaOrcamento, number> = {
+      passagem: modoTransporte === "onibus" ? 900 : modoTransporte === "carro" || modoTransporte === "moto" ? 650 : 2200,
+      hospedagem: noites * 420,
+      visitas: dias * 90,
+      alimentacao: dias * 180,
+      transporteLocal: dias * 70,
+      extras: dias * 45,
+    };
+    if (limite == null || limite <= 0) return base;
+    const totalBase = Object.values(base).reduce((total, valor) => total + valor, 0);
+    const fator = limite / totalBase;
+    return Object.fromEntries(
+      Object.entries(base).map(([categoria, valor]) => [categoria, Math.max(1, Math.round(valor * fator))]),
+    ) as Partial<Record<CategoriaOrcamento, number>>;
+  }
+  function perguntaPedeOrcamento(pergunta: string): boolean {
+    return /orçamento|orcamento|quanto.*gasto|quanto.*levar|valor.*viagem|gastos?|custos?|preço total|preco total|limite por categoria/.test(pergunta.toLowerCase());
+  }
+  function limitarSugestaoOrcamento(sugestao: Partial<Record<CategoriaOrcamento, number>>): Partial<Record<CategoriaOrcamento, number>> {
+    const valores = Object.entries(sugestao).filter(([, valor]) => Number.isFinite(Number(valor)) && Number(valor) > 0) as [CategoriaOrcamento, number][];
+    if (limite == null || limite <= 0) return Object.fromEntries(valores);
+    const total = valores.reduce((soma, [, valor]) => soma + Number(valor), 0);
+    if (total <= limite) return Object.fromEntries(valores);
+    const fator = limite / total;
+    return Object.fromEntries(valores.map(([categoria, valor]) => [categoria, Math.max(1, Math.floor(Number(valor) * fator))]));
   }
   async function enviar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1368,6 +1482,7 @@ function AssistantView({
         modoOrcamento,
         limite,
         acumulado,
+        orcamentoDetalhado,
         idade: preferencias?.idade,
         origem: viagem?.origem || preferencias?.origem,
         destino: viagem?.destino,
@@ -1382,9 +1497,16 @@ function AssistantView({
         ...(hospedagemBase ? { hospedagemBase: `${hospedagemBase.nome} (${hospedagemBase.lat}, ${hospedagemBase.lng})` } : {}),
         roteiro: viagem?.roteiro.map((item) => `dia ${item.dia}: ${item.titulo}`).join(" | "),
       });
+      const sugestaoResposta = resposta.orcamentoSugerido ?? (perguntaPedeOrcamento(pergunta) ? sugestaoOrcamento() : undefined);
+      const respostaComOrcamento: MensagemAssistente = {
+        ...resposta,
+        ...(sugestaoResposta
+          ? { orcamentoSugerido: limitarSugestaoOrcamento(sugestaoResposta) }
+          : {}),
+      };
       // Mostra a resposta textual imediatamente. Places e rotas enriquecem a
       // mensagem, mas não podem bloquear a conversa enquanto são consultados.
-      setMensagens((atuais) => atuais.map((item) => item.id === idResposta ? { ...resposta, id: idResposta } : item));
+      setMensagens((atuais) => atuais.map((item) => item.id === idResposta ? { ...respostaComOrcamento, id: idResposta } : item));
       const destinoBusca = viagem?.destino || preferencias?.destino || "";
       const consultasDaIa = (resposta.consultas ?? [])
         .map((consulta) => consulta.trim())
@@ -1414,7 +1536,7 @@ function AssistantView({
         ),
       );
       const encontrados = resultados.flatMap((item) => item.lugares);
-      let respostaFinal = resposta;
+      let respostaFinal = respostaComOrcamento;
       if (encontrados.length) {
         const unicos = [...new globalThis.Map(encontrados.map((item) => [item.placeId, item])).values()];
         const pedidoHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/i.test(pergunta);
@@ -1440,16 +1562,19 @@ function AssistantView({
         const diasDeViagem = viagem?.dataInicio && viagem?.dataFim
           ? Math.max(1, Math.floor((new Date(`${viagem.dataFim}T12:00:00`).getTime() - new Date(`${viagem.dataInicio}T12:00:00`).getTime()) / 86400000) + 1)
           : 1;
-        const recomendacoesReais: Recomendacao[] = organizados.slice(0, 6).map((lugar, index) => ({
+        const recomendacoesReais: Recomendacao[] = organizados.slice(0, 6).map((lugar, index) => {
+          const estimativa = estimativaLocal(lugar);
+          return {
           id: `lugar-${lugar.placeId}`,
           placeId: lugar.placeId,
           tipo: "lugar",
           titulo: lugar.nome,
-          resumo: `${lugar.categoria} · ${lugar.endereco || "localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""}`,
-          justificativa: `${hospedagemBase ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}. ` : ""}Encontrado no Google Places; confira o Street View antes de adicionar.`,
+          resumo: `${lugar.categoria} · ${lugar.endereco || "localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""}${estimativa.valor > 0 ? ` · ${brl(estimativa.valor)} (${estimativa.rotulo})` : ` · ${estimativa.rotulo}`}`,
+          justificativa: `${hospedagemBase ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}. ` : ""}Encontrado no Google Places; confira o Street View antes de adicionar. O valor é uma estimativa e será somado somente se você adicionar o local.`,
           evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
-          categoria: "visitas",
-          natureza: "observado",
+          categoria: estimativa.categoria,
+          ...(estimativa.valor > 0 ? { valor: estimativa.valor } : {}),
+          natureza: estimativa.valor > 0 ? "estimado" : "observado",
           ...(lugar.avaliacao ? { avaliacao: lugar.avaliacao } : {}),
           ...(lugar.endereco ? { endereco: lugar.endereco } : {}),
           ...(Number.isFinite(lugar.lat) ? { lat: lugar.lat } : {}),
@@ -1457,7 +1582,8 @@ function AssistantView({
           categoriaLocal: lugar.categoria,
           ...(hospedagemBase ? { distanciaKm: distanciaKm(hospedagemBase, lugar) } : {}),
           dia: Math.min(diasDeViagem, Math.floor(index / 3) + 1),
-        }));
+          };
+        });
         respostaFinal = {
           ...resposta,
           texto: organizados.length
@@ -1486,6 +1612,7 @@ function AssistantView({
         modoOrcamento,
         limite,
         acumulado,
+        orcamentoDetalhado,
         destino: destinoBusca,
         origem: viagem?.origem || preferencias?.origem,
         dataInicio: viagem?.dataInicio || preferencias?.dataInicio,
@@ -1495,6 +1622,9 @@ function AssistantView({
         hospedagem: preferencias?.hospedagem,
         ...(hospedagemBase ? { hospedagemBase: hospedagemBase.nome } : {}),
       });
+      if (fallback.orcamentoSugerido) {
+        fallback.orcamentoSugerido = limitarSugestaoOrcamento(fallback.orcamentoSugerido);
+      }
       try {
         const consultasFallback = consultasParaLocais(pergunta, destinoBusca);
         const resultado = await Promise.all(
@@ -1513,18 +1643,21 @@ function AssistantView({
           hospedagemBase ?? undefined,
         ).slice(0, 6);
         setLugares(locais);
-        const recomendacoes: Recomendacao[] = locais.map((lugar, index) => ({
+        const recomendacoes: Recomendacao[] = locais.map((lugar, index) => {
+          const estimativa = estimativaLocal(lugar);
+          return {
           id: `fallback-${lugar.placeId}`,
           placeId: lugar.placeId,
           tipo: "lugar",
           titulo: lugar.nome,
           resumo: `${lugar.categoria} · ${lugar.endereco || "Localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""}`,
           justificativa: hospedagemBase
-            ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem. Confira no Street View antes de escolher.`
-            : "Resultado real consultado no Google Places. Confira no Street View antes de escolher.",
+            ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem. Confira no Street View antes de escolher. O valor é uma estimativa.`
+            : "Resultado real consultado no Google Places. Confira no Street View antes de escolher. O valor é uma estimativa.",
           evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
-          categoria: "visitas",
-          natureza: "observado",
+          categoria: estimativa.categoria,
+          ...(estimativa.valor > 0 ? { valor: estimativa.valor } : {}),
+          natureza: estimativa.valor > 0 ? "estimado" : "observado",
           ...(lugar.avaliacao ? { avaliacao: lugar.avaliacao } : {}),
           ...(lugar.endereco ? { endereco: lugar.endereco } : {}),
           lat: lugar.lat,
@@ -1532,7 +1665,8 @@ function AssistantView({
           categoriaLocal: lugar.categoria,
           ...(hospedagemBase ? { distanciaKm: distanciaKm(hospedagemBase, lugar) } : {}),
           dia: Math.min(viagem?.dataInicio && viagem?.dataFim ? Math.max(1, Math.floor((new Date(`${viagem.dataFim}T12:00:00`).getTime() - new Date(`${viagem.dataInicio}T12:00:00`).getTime()) / 86400000) + 1) : 1, Math.floor(index / 3) + 1),
-        }));
+          };
+        });
         if (recomendacoes.length) {
           fallback.recomendacoes = recomendacoes;
           fallback.texto = `${fallback.texto} Encontrei ${recomendacoes.length} locais reais no Google Places. Abra o Street View e escolha pelo próprio chat.`;
@@ -1628,6 +1762,7 @@ function AssistantView({
       void revisarLugar(lugar);
       return;
     }
+    const estimativa = estimativaLocal(lugar);
     adicionarRecomendacaoControlada({
       id: `lugar-${lugar.placeId}`,
       tipo: "lugar",
@@ -1641,6 +1776,9 @@ function AssistantView({
       lat: lugar.lat,
       lng: lugar.lng,
       categoriaLocal: lugar.categoria,
+      ...(estimativa.valor > 0 ? { valor: estimativa.valor } : {}),
+      categoria: estimativa.categoria,
+      natureza: estimativa.valor > 0 ? "estimado" : "observado",
       dia: diasLugares[lugar.placeId] ?? 1,
     });
   }
@@ -1705,6 +1843,16 @@ function AssistantView({
             </div>
             <span className="chat-online">online</span>
           </div>
+          {resumoFinanceiro && (
+            <div className="chat-budget-context">
+              <strong>Orçamento acompanhado pela IA</strong>
+              <span>{resumoFinanceiro.categorias.map((item) => `${rotuloCategoria(item.categoria)} ${brl(item.subtotal)}`).join(" · ")}</span>
+              <small>
+                Total acumulado: {brl(resumoFinanceiro.total)}
+                {resumoFinanceiro.saldo != null ? ` · Saldo: ${brl(Math.max(0, resumoFinanceiro.saldo))}` : " · orçamento aberto"}
+              </small>
+            </div>
+          )}
           <div className="chat-messages">
             {mensagens.map((mensagem) => (
               <div
@@ -1713,6 +1861,26 @@ function AssistantView({
               >
                 <div className="message-bubble">
                   <p>{mensagem.texto}</p>
+                  {mensagem.orcamentoSugerido && (
+                    <div className="chat-budget-suggestion">
+                      <strong>Estimativa inicial por categoria</strong>
+                      <div className="chat-budget-suggestion-grid">
+                        {CATEGORIAS.map(({ id, rotulo }) => {
+                          const valor = mensagem.orcamentoSugerido?.[id];
+                          return valor == null ? null : <span key={id}><small>{rotulo}</small><b>{brl(valor)}</b></span>;
+                        })}
+                      </div>
+                      <small>Use como ponto de partida. A IA atualiza o acumulado conforme você escolhe passagens, hospedagem e atividades.</small>
+                      <button
+                        type="button"
+                        className="recommendation-action recommendation-add"
+                        disabled={!viagem}
+                        onClick={() => onAplicarOrcamento(mensagem.orcamentoSugerido ?? {})}
+                      >
+                        <WalletCards size={14} /> {viagem ? "Aplicar valores ao orçamento" : "Crie uma viagem para aplicar"}
+                      </button>
+                    </div>
+                  )}
                   {mensagem.recomendacoes?.map((recomendacao) => (
                     <div className="recommendation" key={recomendacao.id}>
                       <div>
@@ -1728,20 +1896,34 @@ function AssistantView({
                         </small>
                       </div>
                       {(recomendacao.tipo === "lugar" || recomendacao.tipo === "atividade") && viagem && (
-                        <label className="recommendation-day-picker">
-                          <span>Adicionar no</span>
-                          <select
-                            value={diaDaRecomendacao(recomendacao)}
-                            onChange={(event) => setDiasSelecionados((atuais) => ({
-                              ...atuais,
-                              [recomendacao.id]: Number(event.target.value),
-                            }))}
-                          >
-                            {Array.from({ length: totalDias }, (_, index) => index + 1).map((dia) => (
-                              <option key={dia} value={dia}>Dia {dia}</option>
-                            ))}
-                          </select>
-                        </label>
+                        <div className="recommendation-schedule">
+                          <label className="recommendation-day-picker">
+                            <span>Dia</span>
+                            <select
+                              value={diaDaRecomendacao(recomendacao)}
+                              onChange={(event) => setDiasSelecionados((atuais) => ({
+                                ...atuais,
+                                [recomendacao.id]: Number(event.target.value),
+                              }))}
+                            >
+                              {Array.from({ length: totalDias }, (_, index) => index + 1).map((dia) => (
+                                <option key={dia} value={dia}>Dia {dia}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="recommendation-day-picker">
+                            <span>Horário</span>
+                            <select
+                              value={horarioDaRecomendacao(recomendacao)}
+                              onChange={(event) => setHorariosSelecionados((atuais) => ({
+                                ...atuais,
+                                [recomendacao.id]: event.target.value,
+                              }))}
+                            >
+                              {HORARIOS_ROTEIRO.map((horario) => <option key={horario} value={horario}>{horario}</option>)}
+                            </select>
+                          </label>
+                        </div>
                       )}
                       {(() => {
                         const lugar = lugarDaRecomendacao(recomendacao);
@@ -1757,7 +1939,7 @@ function AssistantView({
                                   onClick={() => adicionarRecomendacaoControlada({
                                     ...recomendacao,
                                     ...(recomendacao.tipo === "lugar" || recomendacao.tipo === "atividade"
-                                      ? { dia: diaDaRecomendacao(recomendacao) }
+                                      ? { dia: diaDaRecomendacao(recomendacao), horario: horarioDaRecomendacao(recomendacao) }
                                       : {}),
                                   })}>
                                   <Plus size={15} /> Adicionar
@@ -1931,7 +2113,7 @@ function AssistantView({
               {streetViewSelecionado.lugar.avaliacao ? <span>★ {streetViewSelecionado.lugar.avaliacao.toFixed(1)} no Google</span> : <span>Avaliação não informada</span>}
               {streetViewSelecionado.lugar.aberto != null && <span>{streetViewSelecionado.lugar.aberto ? "Aberto agora" : "Fechado agora"}</span>}
             </div>
-            <div className="offer-modal-actions"><a className="secondary-button" href={streetViewSelecionado.meta.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Maps</a><button className="primary-button" type="button" onClick={() => { adicionarRecomendacaoControlada({ id: `lugar-${streetViewSelecionado.lugar.placeId}`, placeId: streetViewSelecionado.lugar.placeId, tipo: "lugar", titulo: streetViewSelecionado.lugar.nome, resumo: `${streetViewSelecionado.lugar.categoria} · ${streetViewSelecionado.lugar.endereco}`, justificativa: "Lugar consultado no Google Places e conferido no Street View.", evidencia: { fonte: streetViewSelecionado.lugar.fonte, consultadoEm: streetViewSelecionado.lugar.consultadoEm }, ...(streetViewSelecionado.lugar.avaliacao ? { avaliacao: streetViewSelecionado.lugar.avaliacao } : {}), endereco: streetViewSelecionado.lugar.endereco, lat: streetViewSelecionado.lugar.lat, lng: streetViewSelecionado.lugar.lng, categoriaLocal: streetViewSelecionado.lugar.categoria, dia: streetViewSelecionado.recomendacao?.dia ?? diasLugares[streetViewSelecionado.lugar.placeId] ?? 1 }); setStreetViewSelecionado(null); }}><Plus size={15} /> Adicionar ao roteiro</button></div>
+            <div className="offer-modal-actions"><a className="secondary-button" href={streetViewSelecionado.meta.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Maps</a><button className="primary-button" type="button" onClick={() => { const estimativa = estimativaLocal(streetViewSelecionado.lugar); const recomendacao = streetViewSelecionado.recomendacao; adicionarRecomendacaoControlada({ id: `lugar-${streetViewSelecionado.lugar.placeId}`, placeId: streetViewSelecionado.lugar.placeId, tipo: "lugar", titulo: streetViewSelecionado.lugar.nome, resumo: `${streetViewSelecionado.lugar.categoria} · ${streetViewSelecionado.lugar.endereco}`, justificativa: "Lugar consultado no Google Places e conferido no Street View.", evidencia: { fonte: streetViewSelecionado.lugar.fonte, consultadoEm: streetViewSelecionado.lugar.consultadoEm }, ...(streetViewSelecionado.lugar.avaliacao ? { avaliacao: streetViewSelecionado.lugar.avaliacao } : {}), endereco: streetViewSelecionado.lugar.endereco, lat: streetViewSelecionado.lugar.lat, lng: streetViewSelecionado.lugar.lng, categoriaLocal: streetViewSelecionado.lugar.categoria, ...(estimativa.valor > 0 ? { valor: estimativa.valor } : {}), categoria: recomendacao?.categoria ?? estimativa.categoria, natureza: recomendacao?.natureza ?? (estimativa.valor > 0 ? "estimado" : "observado"), ...(recomendacao?.horario ? { horario: recomendacao.horario } : {}), ...(recomendacao?.duracaoMinutos ? { duracaoMinutos: recomendacao.duracaoMinutos } : {}), dia: recomendacao?.dia ?? diasLugares[streetViewSelecionado.lugar.placeId] ?? 1 }); setStreetViewSelecionado(null); }}><Plus size={15} /> Adicionar ao roteiro</button></div>
           </div>
         </div>
       )}

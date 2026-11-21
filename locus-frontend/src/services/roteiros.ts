@@ -80,20 +80,39 @@ export async function adicionarRecomendacao(
     const itens = await chamar<Array<{ horarioInicio?: string; duracaoMinutos?: number }>>(() =>
       api.get(`/api/itens-roteiro/dia/${dia.id}`, { params: { usuarioId } }),
     );
-    const fimMaisTarde = itens.reduce((maior, item) => {
-      const [hora, minuto] = String(item.horarioInicio ?? "09:00").split(":").map(Number);
-      const fim = (hora || 0) * 60 + (minuto || 0) + Number(item.duracaoMinutos ?? 60);
-      return Math.max(maior, fim);
-    }, 9 * 60);
-    const inicio = itens.length ? fimMaisTarde + 30 : 10 * 60;
-    const horarioInicio = `${String(Math.floor(inicio / 60)).padStart(2, "0")}:${String(inicio % 60).padStart(2, "0")}`;
+    const duracaoMinutos = recomendacao.duracaoMinutos ?? 90;
+    const horariosDoDia = itens.map((item) => {
+      const [hora, minuto] = String(item.horarioInicio ?? "08:00").split(":").map(Number);
+      return { inicio: (hora || 0) * 60 + (minuto || 0), duracao: Number(item.duracaoMinutos ?? 60) };
+    });
+    const horariosPossiveis = ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00"]
+      .map((horario) => {
+        const [hora, minuto] = horario.split(":").map(Number);
+        return (hora || 0) * 60 + (minuto || 0);
+      });
+    const horarioSolicitado = recomendacao.horario
+      ? (() => {
+          const [hora, minuto] = recomendacao.horario!.split(":").map(Number);
+          return Number.isFinite(hora) && Number.isFinite(minuto) ? hora * 60 + minuto : undefined;
+        })()
+      : undefined;
+    const horarioLivre = [...(horarioSolicitado != null ? [horarioSolicitado] : []), ...horariosPossiveis]
+      .filter((horario, index, lista) => lista.indexOf(horario) === index)
+      .find((inicio) => horariosDoDia.every((item) => {
+        const fimExistente = item.inicio + item.duracao;
+        return inicio + duracaoMinutos <= item.inicio || inicio >= fimExistente;
+      }));
+    if (horarioLivre == null) {
+      throw new Error("Não há horário livre em intervalos de 2 horas neste dia. Escolha outro dia ou remova uma atividade.");
+    }
+    const horarioInicio = `${String(Math.floor(horarioLivre / 60)).padStart(2, "0")}:${String(horarioLivre % 60).padStart(2, "0")}`;
     await chamar(() =>
       api.post(
         `/api/itens-roteiro/dia/${dia.id}`,
         {
           titulo: recomendacao.titulo,
           horarioInicio,
-          duracaoMinutos: recomendacao.duracaoMinutos ?? 90,
+          duracaoMinutos,
           custoEstimado: 0,
           observacoes: recomendacao.resumo,
           motivoRecomendacao: recomendacao.justificativa,

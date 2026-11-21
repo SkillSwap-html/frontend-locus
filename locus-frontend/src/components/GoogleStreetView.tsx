@@ -12,23 +12,40 @@ export function GoogleStreetView({ lat, lng, className = "street-view-frame" }: 
     void carregarGoogleMaps()
       .then((google) => {
         if (!ativo || !elementRef.current) return;
-        const panorama = new google.maps.StreetViewPanorama(elementRef.current, {
-          position: { lat, lng },
-          pov: { heading: 0, pitch: 0 },
-          zoom: 1,
-          visible: true,
-          addressControl: true,
-          fullscreenControl: true,
-          linksControl: true,
-          motionTrackingControl: false,
-        });
-        const listener = panorama.addListener("status_changed", () => {
-          const status = panorama.getStatus?.();
-          if (status && status !== google.maps.StreetViewStatus?.OK && ativo) {
-            setErro("O Google não encontrou uma panorâmica disponível exatamente neste ponto.");
-          }
-        });
-        return listener;
+        const criarPanorama = (position: { lat: number; lng: number }) => {
+          if (!ativo || !elementRef.current) return;
+          const panorama = new google.maps.StreetViewPanorama(elementRef.current, {
+            position,
+            pov: { heading: 0, pitch: 0 },
+            zoom: 1,
+            visible: true,
+            addressControl: true,
+            fullscreenControl: true,
+            linksControl: true,
+            motionTrackingControl: false,
+          });
+          panorama.addListener("status_changed", () => {
+            const status = panorama.getStatus?.();
+            if (status && status !== google.maps.StreetViewStatus?.OK && ativo) {
+              setErro("O Google não encontrou uma panorâmica próxima deste ponto.");
+            }
+          });
+        };
+        // O ponto turístico pode não ter uma foto exatamente nas coordenadas
+        // retornadas pelo Places. O serviço oficial procura a panorâmica mais
+        // próxima para evitar o falso erro visto em praias e calçadões.
+        new google.maps.StreetViewService().getPanorama(
+          { location: { lat, lng }, radius: 2500, source: "OUTDOOR" },
+          (data, status) => {
+            if (!ativo) return;
+            const position = data?.location?.latLng;
+            if (status === google.maps.StreetViewStatus?.OK && position) {
+              criarPanorama(position);
+            } else {
+              setErro("O Google não encontrou uma panorâmica pública próxima deste ponto.");
+            }
+          },
+        );
       })
       .catch((error: unknown) => {
         if (ativo) setErro(error instanceof Error ? error.message : "O Street View não pôde ser carregado.");
