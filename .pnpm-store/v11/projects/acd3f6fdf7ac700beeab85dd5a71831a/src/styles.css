@@ -345,6 +345,11 @@
 .form-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .form-actions > span { display: flex; align-items: center; gap: 6px; color: #7f8e84; font-size: 10px; }
 .admin-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.admin-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.admin-metric { display: grid; gap: 7px; padding: 15px; border: 1px solid #e2dbd1; border-radius: 13px; background: #fff; }
+.admin-metric svg { color: var(--locus-coral); }
+.admin-metric span { color: #819087; font-size: 10px; }
+.admin-metric strong { color: var(--locus-deep); font-size: 22px; }
 .admin-panel { padding: 18px; }
 .admin-add { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 14px 0 9px; }
 .admin-list { display: grid; gap: 7px; margin-top: 15px; }
@@ -357,6 +362,7 @@
 .count-pill { padding: 4px 8px; border-radius: 12px; background: #f3e5dd; color: #a46855; font-size: 10px; }
 @media (max-width: 760px) {
   .admin-grid { grid-template-columns: 1fr; }
+  .admin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .form-actions { align-items: stretch; flex-direction: column; }
   .planning-budget { align-items: flex-start; flex-direction: column; }
 }
@@ -560,6 +566,43 @@ button {
   border-radius: 50%;
   background: var(--locus-coral);
 }
+.notification-wrap { position: relative; }
+.notification-panel { position: absolute; z-index: 20; top: 44px; right: 0; width: 320px; max-width: calc(100vw - 28px); padding: 14px; border: 1px solid #e2dbd1; border-radius: 14px; background: #fff; box-shadow: 0 18px 42px rgba(74, 61, 45, .15); }
+.notification-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid #eee8e0; }
+.notification-panel-heading > div { display: grid; gap: 3px; }
+.notification-panel-heading strong { color: var(--locus-deep); font-size: 13px; }
+.notification-panel-heading button { display: flex; align-items: center; gap: 4px; border: 0; background: transparent; color: #7667a8; font-size: 10px; }
+.notification-item { display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 11px 4px; border: 0; border-bottom: 1px solid #f1ece5; background: transparent; text-align: left; }
+.notification-item:last-child { border-bottom: 0; }
+.notification-item > span:last-child { display: grid; gap: 3px; min-width: 0; }
+.notification-item strong { color: var(--locus-deep); font-size: 11px; }
+.notification-item small { color: #87928b; font-size: 10px; line-height: 1.4; }
+.notification-item-dot { width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: var(--locus-coral); flex: 0 0 auto; }
+.notification-item.is-read .notification-item-dot { background: #d8d2ca; }
+.notification-item.is-read strong { color: #768078; font-weight: 500; }
+.notification-empty { margin: 16px 4px 4px; color: #87928b; font-size: 11px; }
+.checkbox-field { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #65736b; font-size: 11px; }
+.checkbox-field input { accent-color: var(--locus-coral); }
+.hotel-offers { display: grid; gap: 10px; margin-top: 13px; }
+.hotel-offer { display: grid; grid-template-columns: 84px 1fr; gap: 10px; overflow: hidden; border: 1px solid #e8e0d6; border-radius: 10px; background: #fff; }
+.hotel-offer > img { width: 84px; height: 100%; min-height: 114px; object-fit: cover; }
+.hotel-offer-body { display: grid; gap: 5px; align-content: center; padding: 9px 9px 9px 0; }
+.hotel-offer-body strong { color: var(--locus-deep); font-size: 11px; }
+.hotel-offer-body small { color: #8c958f; font-size: 9px; }
+.hotel-offer-body b { color: #a66451; font-size: 12px; }
+.hotel-offer-body button { display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 29px; border: 0; border-radius: 7px; background: #eaf2e9; color: #38634e; font-size: 10px; }
+.hotel-offer.over-budget, .offer-result.over-budget { opacity: .65; }
+.offer-modal-backdrop { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(39, 52, 59, .34); }
+.offer-modal { position: relative; width: min(440px, 100%); display: grid; gap: 10px; padding: 21px; border: 1px solid #e6ddd2; border-radius: 16px; background: #fffdf9; box-shadow: 0 22px 58px rgba(39, 52, 59, .2); }
+.offer-modal-close { position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: #f5eee6; color: #7c746c; }
+.offer-modal-image { width: calc(100% + 42px); height: 170px; margin: -21px -21px 3px; object-fit: cover; border-radius: 16px 16px 0 0; }
+.offer-modal h3 { margin: 0; color: var(--locus-deep); font-size: 19px; }
+.offer-modal p { margin: 0; color: #78827c; font-size: 12px; }
+.offer-modal-price { color: #a66451; font-size: 18px; }
+.offer-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.offer-map-link { display: flex; align-items: center; gap: 5px; color: #7667a8; font-size: 10px; }
+.street-view-modal-image, .street-view-frame { width: 100%; height: 220px; border: 0; border-radius: 10px; object-fit: cover; background: #f1ece5; }
+.street-view-modal .secondary-button { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 .profile-trigger {
   display: inline-flex;
   gap: 8px;

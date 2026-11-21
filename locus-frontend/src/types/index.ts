@@ -93,6 +93,7 @@ export interface Viagem {
   dataFim: string;
   transporte: Transporte;
   modoOrcamento: ModoOrcamento;
+  mochilao?: boolean;
   limites: Record<CategoriaOrcamento, number>;
   roteiro: ItemRoteiro[];
   versoes: { id: string; criadaEm: string; itens: ItemRoteiro[] }[];
@@ -154,6 +155,9 @@ export interface OfertaHotel {
   moeda: string;
   taxas: number;
   preco: number;
+  imagemUrl?: string;
+  latitude?: number;
+  longitude?: number;
   fonte: string;
   consultadoEm: string;
   historico: Snapshot[];
@@ -188,7 +192,7 @@ export interface Notificacao {
   id: string;
   titulo: string;
   texto: string;
-  tipo: "preco" | "roteiro" | "colaboracao" | "sistema";
+  tipo: string;
   lida: boolean;
   criadaEm: string;
 }

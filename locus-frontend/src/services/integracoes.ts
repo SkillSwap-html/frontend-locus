@@ -267,6 +267,9 @@ function normalizarVoo(raw: unknown): OfertaVoo {
   const segments = Array.isArray(firstItinerary.segments) ? firstItinerary.segments : [];
   const first = objeto(segments[0]);
   const last = objeto(segments[segments.length - 1]);
+  const returnItinerary = objeto(itineraries[1]);
+  const returnSegments = Array.isArray(returnItinerary.segments) ? returnItinerary.segments : [];
+  const returnDeparture = objeto(objeto(returnSegments[0]).departure);
   const departure = objeto(first.departure);
   const arrival = objeto(last.arrival);
   return {
@@ -277,7 +280,7 @@ function normalizarVoo(raw: unknown): OfertaVoo {
     origem: texto(departure.iataCode),
     destino: texto(arrival.iataCode),
     ida: texto(departure.at),
-    volta: texto(objeto(objeto(itineraries[1]).segments?.[0]).departure),
+    volta: texto(returnDeparture.at),
     passageiros: 1,
     classe: "Econômica",
     bagagem: "Consultar oferta",
@@ -336,6 +339,15 @@ function normalizarHotel(raw: unknown): OfertaHotel {
     moeda: texto(price.currency) || "BRL",
     taxas: 0,
     preco: numero(price.total),
+    imagemUrl:
+      texto(hotel.imageUrl) ||
+      [
+        "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=900&q=80",
+        "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=900&q=80",
+      ][Math.abs(texto(hotel.hotelId).length) % 3],
+    latitude: numero(objeto(hotel.geoCode).latitude),
+    longitude: numero(objeto(hotel.geoCode).longitude),
     fonte: value.simulated === true ? "Locus (simulado)" : "Provedor configurado",
     consultadoEm: new Date().toISOString(),
     historico: [],

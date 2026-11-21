@@ -27,6 +27,18 @@ const limitesVazios = (): Record<CategoriaOrcamento, number> => ({
   extras: 0,
 });
 
+function categoriaOrcamento(value: unknown): CategoriaOrcamento {
+  const normalizada = String(value ?? "EXTRAS").toUpperCase();
+  return ({
+    PASSAGEM: "passagem",
+    HOSPEDAGEM: "hospedagem",
+    VISITAS: "visitas",
+    ALIMENTACAO: "alimentacao",
+    TRANSPORTE_LOCAL: "transporteLocal",
+    EXTRAS: "extras",
+  } as Record<string, CategoriaOrcamento>)[normalizada] ?? "extras";
+}
+
 function transporte(modo: unknown): Viagem["transporte"] {
   const value = String(modo ?? "").toUpperCase();
   return (
@@ -54,6 +66,7 @@ async function hidratar(raw: Record<string, unknown>): Promise<Viagem> {
     dataFim: String(raw["dataFim"] ?? ""),
     transporte: transporte(raw["modoTransporte"]),
     modoOrcamento: String(raw["tipoOrcamento"] ?? "").toUpperCase() === "FIXO" ? "fixo" : "aberto",
+    mochilao: Boolean(raw["mochilao"]),
     limites: limitesVazios(),
     roteiro: [],
     versoes: [],
@@ -107,13 +120,13 @@ async function hidratar(raw: Record<string, unknown>): Promise<Viagem> {
 
   const itensOrcamento: ItemOrcamento[] = orcamento.map((item) => ({
     id: String(item["id"] ?? ""),
-    categoria: String(item["categoria"] ?? "extras") as CategoriaOrcamento,
+    categoria: categoriaOrcamento(item["categoria"]),
     descricao: String(item["descricao"] ?? ""),
     valor: Number(item["valor"] ?? 0),
     natureza: String(item["fonte"] ?? "ESTIMADO").toLowerCase() as ItemOrcamento["natureza"],
   }));
   const limitesMap = limites.reduce<Record<CategoriaOrcamento, number>>((acc, item) => {
-    const categoria = String(item["categoria"] ?? "extras") as CategoriaOrcamento;
+    const categoria = categoriaOrcamento(item["categoria"]);
     if (categorias.includes(categoria)) acc[categoria] = Number(item["valorLimite"] ?? 0);
     return acc;
   }, limitesVazios());
@@ -154,12 +167,14 @@ export async function criarViagem(
     | "transporte"
     | "modoOrcamento"
     | "limites"
+    | "mochilao"
   >,
 ): Promise<Viagem> {
   const criada = await chamar<Record<string, unknown>>(() =>
     api.post(
       `/api/viagens/usuario/${backendUserId()}`,
       {
+        titulo: dados.titulo,
         origem: dados.origem,
         destino: dados.destino,
         dataInicio: dados.dataInicio,
@@ -174,10 +189,20 @@ export async function criarViagem(
           } as Record<string, string>
         )[dados.transporte],
         tipoOrcamento: dados.modoOrcamento === "fixo" ? "FIXO" : "ABERTO",
+        mochilao: Boolean(dados.mochilao),
       },
       { params: { usuarioSolicitanteId: backendUserId() } },
     ),
   );
+  if (dados.modoOrcamento === "fixo" && Number(dados.limites.extras || 0) > 0) {
+    await chamar(() =>
+      api.post(
+        `/api/limites-orcamento/viagem/${criada.id}`,
+        { categoria: "EXTRAS", valorLimite: Number(dados.limites.extras) },
+        { params: { usuarioSolicitanteId: backendUserId() } },
+      ),
+    );
+  }
   return hidratar(criada);
 }
 
@@ -194,17 +219,33 @@ export async function lerPreferencias(): Promise<Preferencias | null> {
 }
 
 export async function listarNotificacoes(): Promise<Notificacao[]> {
-  return chamar(() =>
-    api.get<Notificacao[]>(`/api/notificacoes/usuario/${backendUserId()}`, {
+  const lista = await chamar<Array<Record<string, unknown>>>(() =>
+    api.get<Array<Record<string, unknown>>>(`/api/notificacoes/usuario/${backendUserId()}`, {
       params: { usuarioSolicitanteId: backendUserId() },
     }),
   );
+  return lista.map((item) => ({
+    id: String(item["id"] ?? ""),
+    titulo: String(item["titulo"] ?? "Atualização do Locus"),
+    texto: String(item["mensagem"] ?? item["texto"] ?? ""),
+    tipo: String(item["tipo"] ?? "GERAL"),
+    lida: Boolean(item["lida"]),
+    criadaEm: String(item["dataCriacao"] ?? item["criadaEm"] ?? ""),
+  }));
 }
 
 export async function marcarLida(id: string): Promise<void> {
   await chamar(() =>
     api.put(`/api/notificacoes/${id}/ler`, undefined, {
       params: { usuarioId: backendUserId(), usuarioSolicitanteId: backendUserId() },
+    }),
+  );
+}
+
+export async function marcarTodasComoLidas(): Promise<void> {
+  await chamar(() =>
+    api.put(`/api/notificacoes/usuario/${backendUserId()}/ler-todas`, undefined, {
+      params: { usuarioSolicitanteId: backendUserId() },
     }),
   );
 }

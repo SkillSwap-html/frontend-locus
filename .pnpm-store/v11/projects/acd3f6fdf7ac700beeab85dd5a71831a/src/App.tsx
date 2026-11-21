@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "re
 import {
   ArrowRight,
   Bell,
+  CheckCheck,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -42,7 +43,7 @@ import { confirmarRoteiro } from "@/services/reservas";
 import { baixarRelatorio, listarRelatorios } from "@/services/relatorios";
 import { adicionarRecomendacao, criarRoteiroInicial } from "@/services/roteiros";
 import { sincronizarUsuario } from "@/services/usuarioBackend";
-import { criarViagem, listarViagens, obterViagem } from "@/services/viagens";
+import { criarViagem, listarNotificacoes, listarViagens, marcarLida, marcarTodasComoLidas, obterViagem } from "@/services/viagens";
 import { MapPreview } from "@/components/MapPreview";
 import { AdminView } from "@/components/AdminView";
 import { PlanningFlow } from "@/components/PlanningFlow";
@@ -58,6 +59,7 @@ import type {
   Preferencias,
   Recomendacao,
   Relatorio,
+  Notificacao,
   Transporte,
   Usuario,
   Viagem,
@@ -87,6 +89,7 @@ const dataPadrao = {
   transporte: "aviao" as Transporte,
   modoOrcamento: "aberto" as ModoOrcamento,
   limiteTotal: "",
+  mochilao: false,
 };
 
 function campo<T = unknown>(obj: unknown, chave: string): T | undefined {
@@ -176,6 +179,8 @@ function App() {
   const [mobileMenu, setMobileMenu] = useState(false);
   const [toast, setToast] = useState("");
   const [carregando, setCarregando] = useState(false);
+  const [notificacoes, setNotificacoes] = useState<Notificacao[]>([]);
+  const [notificacoesAbertas, setNotificacoesAbertas] = useState(false);
 
   useEffect(() => {
     void usuarioAtual().then(setUsuario);
@@ -192,8 +197,12 @@ function App() {
         setToast(normalizarErro(error).message);
       }
       try {
-        const lista = await listarViagens();
+        const [lista, notificacoesAtuais] = await Promise.all([
+          listarViagens(),
+          listarNotificacoes().catch(() => []),
+        ]);
         setViagens(lista);
+        setNotificacoes(notificacoesAtuais);
         if (lista.length > 0) setSelecionada((atual) => atual ?? lista[0]!);
         const porViagem = await Promise.all(
           lista.map((item) => listarRelatorios(item.id).catch(() => [])),
@@ -229,6 +238,8 @@ function App() {
     setViagens([]);
     setSelecionada(null);
     setRelatorios([]);
+    setNotificacoes([]);
+    setNotificacoesAbertas(false);
     setView("inicio");
   }
   async function abrirViagem(viagem: Viagem) {
@@ -281,6 +292,17 @@ function App() {
   function navegar(proxima: View) {
     setView(proxima);
     setMobileMenu(false);
+  }
+
+  async function alternarNotificacoes() {
+    const abrir = !notificacoesAbertas;
+    setNotificacoesAbertas(abrir);
+    if (!abrir) return;
+    try {
+      setNotificacoes(await listarNotificacoes());
+    } catch {
+      setToast("Não foi possível atualizar suas notificações agora.");
+    }
   }
 
   if (!usuario)
@@ -367,14 +389,22 @@ function App() {
             <span>Busque destinos, viagens e inspirações</span>
           </div>
           <div className="topbar-actions">
-            <button
-              className="icon-button"
-              aria-label="Notificações"
-              onClick={() => setToast("Você está em dia com as novidades do Locus.")}
-            >
-              <Bell size={19} />
-              <span className="notification-dot" />
-            </button>
+            <div className="notification-wrap">
+              <button
+                className="icon-button"
+                aria-label="Notificações"
+                onClick={() => void alternarNotificacoes()}
+              >
+                <Bell size={19} />
+                {notificacoes.some((item) => !item.lida) && <span className="notification-dot" />}
+              </button>
+              {notificacoesAbertas && (
+                <div className="notification-panel">
+                  <div className="notification-panel-heading"><div><span className="section-label">Central</span><strong>Notificações</strong></div><button type="button" onClick={() => { void marcarTodasComoLidas().then(() => setNotificacoes((atuais) => atuais.map((item) => ({ ...item, lida: true })))); }}><CheckCheck size={15} /> Ler todas</button></div>
+                  {notificacoes.length ? notificacoes.slice(0, 8).map((item) => <button className={`notification-item ${item.lida ? "is-read" : ""}`} type="button" key={item.id} onClick={() => { if (!item.lida) void marcarLida(item.id).then(() => setNotificacoes((atuais) => atuais.map((atual) => atual.id === item.id ? { ...atual, lida: true } : atual))); }}><span className="notification-item-dot" /><span><strong>{item.titulo}</strong><small>{item.texto}</small></span></button>) : <p className="notification-empty">Você ainda não tem novidades.</p>}
+                </div>
+              )}
+            </div>
             <button className="profile-trigger" onClick={() => navegar("perfil")}>
               <Avatar nome={usuario.nome} />
               <span>{usuario.nome.split(" ")[0]}</span>
@@ -405,6 +435,7 @@ function App() {
                   const criada = await criarViagem(dados);
                   const pronta = await criarRoteiroInicial(criada);
                   setViagens((atuais) => [pronta, ...atuais]);
+                  setNotificacoes(await listarNotificacoes().catch(() => []));
                   setSelecionada(pronta);
                   setToast("Viagem criada. Agora vamos montar o seu roteiro.");
                   setView("viagem");
@@ -786,6 +817,7 @@ function NovaViagemView({
       | "transporte"
       | "modoOrcamento"
       | "limites"
+      | "mochilao"
     >,
   ) => Promise<void>;
   onCancelar: () => void;
@@ -805,7 +837,8 @@ function NovaViagemView({
       dataFim: form.dataFim,
       transporte: form.transporte,
       modoOrcamento: form.modoOrcamento,
-      limites: { ...LIMITES, passagem: Number(form.limiteTotal) || 0 },
+      limites: { ...LIMITES, extras: Number(form.limiteTotal) || 0 },
+      mochilao: form.mochilao,
     });
   }
   return (
@@ -902,6 +935,7 @@ function NovaViagemView({
               placeholder="R$ 0,00"
             />
           </div>
+          <label className="checkbox-field"><input type="checkbox" checked={form.mochilao} onChange={(event) => setForm((atual) => ({ ...atual, mochilao: event.target.checked }))} /><span>É um mochilão com vários países ou cidades no mesmo período</span></label>
         </div>
         <div className="form-actions">
           <button type="button" className="secondary-button" onClick={onCancelar}>
@@ -910,7 +944,7 @@ function NovaViagemView({
           <button
             type="submit"
             className="primary-button"
-            disabled={carregando || !form.destino || !form.dataInicio || !form.dataFim}
+            disabled={carregando || !form.destino || !form.dataInicio || !form.dataFim || (form.modoOrcamento === "fixo" && Number(form.limiteTotal) <= 0)}
           >
             {carregando ? "Criando..." : "Criar viagem"} <ArrowRight size={17} />
           </button>
@@ -1059,14 +1093,19 @@ function AssistantView({
   const [busca, setBusca] = useState("");
   const [lugares, setLugares] = useState<Lugar[]>([]);
   const [streetViews, setStreetViews] = useState<Record<string, StreetViewMeta>>({});
+  const [streetViewSelecionado, setStreetViewSelecionado] = useState<{ lugar: Lugar; meta: StreetViewMeta } | null>(null);
   const [preferencias, setPreferencias] = useState<Preferencias | null>(null);
   const [rota, setRota] = useState<Trecho[]>([]);
   const [enviando, setEnviando] = useState(false);
   useEffect(() => {
     void lerPreferenciasBackend().then(setPreferencias).catch(() => undefined);
   }, []);
-  const modoOrcamento = preferencias?.modoOrcamento ?? viagem?.modoOrcamento ?? "aberto";
-  const limite = modoOrcamento === "fixo" ? preferencias?.limites.extras ?? viagem?.limites.extras : undefined;
+  const modoOrcamento: ModoOrcamento = viagem?.modoOrcamento ?? preferencias?.modoOrcamento ?? "aberto";
+  const limiteViagem = viagem ? Object.values(viagem.limites).reduce((total, valor) => total + Number(valor || 0), 0) : 0;
+  const limitePreferencias = Number(preferencias?.limites.extras || 0);
+  const limite = modoOrcamento === "fixo"
+    ? (limiteViagem > 0 ? limiteViagem : limitePreferencias > 0 ? limitePreferencias : undefined)
+    : undefined;
   const acumulado = viagem ? totalViagem(viagem) : 0;
   async function enviar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1133,13 +1172,17 @@ function AssistantView({
     try {
       const resultado = await streetViewMetadata(lugar.lat, lugar.lng);
       setStreetViews((atual) => ({ ...atual, [lugar.placeId]: resultado }));
+      setStreetViewSelecionado({ lugar, meta: resultado });
       onToast(
         resultado.status === "OK"
           ? `${lugar.nome} está pronto para você conferir no mapa e no Street View.`
           : `O Street View não encontrou uma imagem disponível para ${lugar.nome}.`,
       );
     } catch (error) {
-      onToast(normalizarErro(error).message);
+      const fallback: StreetViewMeta = { status: "FALLBACK", mapaUrl: `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lugar.lat},${lugar.lng}` };
+      setStreetViews((atual) => ({ ...atual, [lugar.placeId]: fallback }));
+      setStreetViewSelecionado({ lugar, meta: fallback });
+      onToast("A visualização foi aberta no Google Maps. A imagem depende da disponibilidade do ponto.");
     }
   }
   function distanciaTexto(lugar: Lugar): string {
@@ -1350,6 +1393,18 @@ function AssistantView({
           </div>
         </aside>
       </div>
+      {streetViewSelecionado && (
+        <div className="offer-modal-backdrop" role="dialog" aria-modal="true" aria-label="Street View do local">
+          <div className="offer-modal street-view-modal">
+            <button className="offer-modal-close" type="button" onClick={() => setStreetViewSelecionado(null)} aria-label="Fechar"><X size={17} /></button>
+            <span className="section-label">Antes de adicionar</span>
+            <h3>{streetViewSelecionado.lugar.nome}</h3>
+            {streetViewSelecionado.meta.imagemUrl ? <img className="street-view-modal-image" src={streetViewSelecionado.meta.imagemUrl} alt={`Street View de ${streetViewSelecionado.lugar.nome}`} /> : <iframe className="street-view-frame" src={streetViewSelecionado.meta.mapaUrl} title={`Street View de ${streetViewSelecionado.lugar.nome}`} loading="lazy" />}
+            <p>{streetViewSelecionado.lugar.endereco || "Local consultado no mapa"}</p>
+            <div className="offer-modal-actions"><a className="secondary-button" href={streetViewSelecionado.meta.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Maps</a><button className="primary-button" type="button" onClick={() => { onAdicionar({ id: `lugar-${streetViewSelecionado.lugar.placeId}`, tipo: "lugar", titulo: streetViewSelecionado.lugar.nome, resumo: `${streetViewSelecionado.lugar.categoria} · ${streetViewSelecionado.lugar.endereco}`, justificativa: "Lugar consultado no Google Places e conferido no Street View.", evidencia: { fonte: streetViewSelecionado.lugar.fonte, consultadoEm: streetViewSelecionado.lugar.consultadoEm } }); setStreetViewSelecionado(null); }}><Plus size={15} /> Adicionar ao roteiro</button></div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

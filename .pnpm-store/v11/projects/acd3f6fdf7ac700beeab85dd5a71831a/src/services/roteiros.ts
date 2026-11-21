@@ -1,7 +1,18 @@
-import type { ItemRoteiro, Recomendacao, Viagem } from "@/types";
+import type { CategoriaOrcamento, ItemRoteiro, Recomendacao, Viagem } from "@/types";
 import { api, chamar } from "./api";
 import { obterViagem } from "./viagens";
 import { backendUserId } from "./usuarioBackend";
+
+function categoriaBackend(categoria: CategoriaOrcamento | undefined): string {
+  return ({
+    passagem: "PASSAGEM",
+    hospedagem: "HOSPEDAGEM",
+    visitas: "VISITAS",
+    alimentacao: "ALIMENTACAO",
+    transporteLocal: "TRANSPORTE_LOCAL",
+    extras: "EXTRAS",
+  } as Record<string, string>)[String(categoria ?? "visitas")] ?? "VISITAS";
+}
 
 export async function salvarRoteiro(_viagemId: string, _itens: ItemRoteiro[]): Promise<Viagem> {
   throw new Error("Use os endpoints de dias e itens de roteiro para persistir as atividades.");
@@ -67,6 +78,8 @@ export async function adicionarRecomendacao(
     api.get(`/api/dias-roteiro/viagem/${viagemId}`, { params: { usuarioId } }),
   );
   const dia = dias[0] ?? (await criarDia(viagemId));
+  const valor = Number(recomendacao.valor ?? 0);
+  const possuiValor = Number.isFinite(valor) && valor > 0;
   await chamar(() =>
     api.post(
       `/api/itens-roteiro/dia/${dia.id}`,
@@ -74,13 +87,26 @@ export async function adicionarRecomendacao(
         titulo: recomendacao.titulo,
         horarioInicio: "10:00",
         duracaoMinutos: 90,
-        custoEstimado: recomendacao.valor ?? 0,
+        custoEstimado: 0,
         observacoes: recomendacao.resumo,
         motivoRecomendacao: recomendacao.justificativa,
       },
       { params: { usuarioId } },
     ),
   );
+  if (possuiValor) {
+    await chamar(() =>
+      api.post(
+        `/api/itens-orcamento/viagem/${viagemId}`,
+        {
+          categoria: categoriaBackend(recomendacao.categoria),
+          descricao: recomendacao.titulo,
+          valor,
+        },
+        { params: { usuarioSolicitanteId: usuarioId } },
+      ),
+    );
+  }
   return obterViagem(viagemId);
 }
 

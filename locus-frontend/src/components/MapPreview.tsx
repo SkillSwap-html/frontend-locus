@@ -77,8 +77,8 @@ export function MapPreview({ lugares }: { lugares: Lugar[] }) {
   if (!key)
     return (
       <div className="map-preview map-preview-empty">
-        <strong>Mapa interativo indisponível neste momento</strong>
-        <span>Você ainda pode conferir o endereço e abrir o Street View de cada lugar.</span>
+        <strong>Confira os lugares no Google Maps</strong>
+        <span>Você pode abrir o endereço e o Street View de cada lugar antes de escolher.</span>
       </div>
     );
   if (erro) return <div className="map-preview map-preview-empty">{erro}</div>;
