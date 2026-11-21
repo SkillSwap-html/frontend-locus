@@ -118,24 +118,56 @@ function interpretarAssistente(raw: unknown): Pick<MensagemAssistente, "texto" |
   };
 }
 
+type ContextoAssistente = {
+  modoOrcamento?: "fixo" | "aberto";
+  limite?: number;
+  acumulado?: number;
+  origem?: string;
+  destino?: string;
+  dataInicio?: string;
+  dataFim?: string;
+  transporte?: string;
+  interesses?: string[];
+  ritmo?: string;
+  hospedagem?: string;
+  roteiro?: string;
+};
+
+function respostaLocalAssistente(textoPergunta: string, contexto?: ContextoAssistente): MensagemAssistente {
+  const destino = contexto?.destino?.trim();
+  const pergunta = textoPergunta.toLowerCase();
+  const querHospedagem = /hotel|hospedagem|pousada|hostel|onde ficar/.test(pergunta);
+  const querPassagem = /passagem|passagens|voo|voos|avião|aviao/.test(pergunta);
+  const consultas = destino
+    ? [
+        querHospedagem
+          ? `hotéis e hospedagens reais em ${destino}`
+          : querPassagem
+            ? `pontos de apoio e aeroporto em ${destino}`
+            : `pontos turísticos, praias e atrações em ${destino}`,
+        ...(contexto?.interesses?.length ? [`${contexto.interesses.join(", ")} em ${destino}`] : []),
+      ]
+    : [];
+  const limite = contexto?.limite == null
+    ? "Orçamento aberto: vou somar cada escolha."
+    : `Saldo disponível aproximado: R$ ${Math.max(0, contexto.limite - (contexto.acumulado ?? 0)).toFixed(2)}.`;
+  return {
+    id: uid(),
+    autor: "assistente",
+    texto: destino
+      ? `Entendi. Vou buscar opções reais em ${destino}, organizar por proximidade e separar as sugestões por dia. ${limite} Confira os resultados e o Street View antes de adicionar.`
+      : "Para montar recomendações reais, preciso saber qual é o destino da viagem. Informe a cidade e o país no chat ou crie uma viagem primeiro.",
+    ...(consultas.length ? { consultas } : {}),
+    etapa: querPassagem ? "passagem" : querHospedagem ? "hospedagem" : "roteiro",
+    criadaEm: new Date().toISOString(),
+  };
+}
+
 // ---------- Assistente Locus (Gemini com fallback Groq no backend) ----------
 export async function perguntarGemini(
   historico: MensagemAssistente[],
   textoPergunta: string,
-  contexto?: {
-    modoOrcamento?: "fixo" | "aberto";
-    limite?: number;
-    acumulado?: number;
-    origem?: string;
-    destino?: string;
-    dataInicio?: string;
-    dataFim?: string;
-    transporte?: string;
-    interesses?: string[];
-    ritmo?: string;
-    hospedagem?: string;
-    roteiro?: string;
-  },
+  contexto?: ContextoAssistente,
 ): Promise<MensagemAssistente> {
   const historicoTexto = historico
     .slice(-8)
@@ -164,16 +196,23 @@ export async function perguntarGemini(
   const prompt = [financeiro, viagem, regras, historicoTexto, `Usuário: ${textoPergunta}`]
     .filter(Boolean)
     .join("\n\n");
-  const raw = await chamar(() =>
-    api.post<Json>(`${BASE}/gemini/conteudo`, { prompt }, { timeout: 30000 }),
-  );
-  const interpretada = interpretarAssistente(raw);
-  return {
-    id: uid(),
-    autor: "assistente",
-    ...interpretada,
-    criadaEm: new Date().toISOString(),
-  };
+  try {
+    const raw = await chamar(() =>
+      api.post<Json>(`${BASE}/gemini/conteudo`, { prompt }, { timeout: 30000 }),
+    );
+    const interpretada = interpretarAssistente(raw);
+    if (interpretada.texto !== "Recebi uma resposta vazia. Tente reformular a pergunta." || interpretada.consultas?.length) {
+      return {
+        id: uid(),
+        autor: "assistente",
+        ...interpretada,
+        criadaEm: new Date().toISOString(),
+      };
+    }
+  } catch {
+    // O planejador local mantém o chat útil enquanto o provedor de IA se recupera.
+  }
+  return respostaLocalAssistente(textoPergunta, contexto);
 }
 
 // ---------- Google Places ----------

@@ -1136,11 +1136,16 @@ function AssistantView({
         hospedagem: preferencias?.hospedagem,
         roteiro: viagem?.roteiro.map((item) => `dia ${item.dia}: ${item.titulo}`).join(" | "),
       });
+      setMensagens((atuais) => [...atuais, resposta]);
       const consultas = resposta.consultas?.length ? resposta.consultas : [pergunta];
       const destinoBusca = viagem?.destino || preferencias?.destino || "";
       const resultados = await Promise.all(
         consultas.slice(0, 3).map((consulta) =>
-          buscaTextual(destinoBusca ? `${consulta} em ${destinoBusca}` : consulta)
+          buscaTextual(
+            destinoBusca && !consulta.toLowerCase().includes(destinoBusca.toLowerCase())
+              ? `${consulta} em ${destinoBusca}`
+              : consulta,
+          )
             .catch(() => ({ lugares: [], fallback: false })),
         ),
       );
@@ -1182,7 +1187,7 @@ function AssistantView({
         delete respostaSemRecomendacoes.recomendacoes;
         respostaFinal = respostaSemRecomendacoes;
       }
-      setMensagens((atuais) => [...atuais, respostaFinal]);
+      setMensagens((atuais) => atuais.map((item) => item.id === resposta.id ? respostaFinal : item));
     } catch (error) {
       onToast(normalizarErro(error).message);
     } finally {
