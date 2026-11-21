@@ -1737,9 +1737,10 @@ function AssistantView({
     const coordenadasValidas = Number.isFinite(lugar.lat)
       && Number.isFinite(lugar.lng)
       && !(lugar.lat === 0 && lugar.lng === 0);
+    const consulta = encodeURIComponent([lugar.nome, lugar.endereco].filter(Boolean).join(", "));
     const mapaUrl = coordenadasValidas
       ? `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lugar.lat},${lugar.lng}`
-      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([lugar.nome, lugar.endereco].filter(Boolean).join(", "))}`;
+      : `https://www.google.com/maps/search/?api=1&query=${consulta}`;
     const metaExistente = streetViews[lugar.placeId];
     if (metaExistente) {
       setStreetViewSelecionado({ lugar, meta: { ...metaExistente, mapaUrl } });
@@ -1757,6 +1758,19 @@ function AssistantView({
     if (!url) return;
     const janela = window.open(url, "_blank", "noopener,noreferrer");
     if (!janela) onToast("Permita pop-ups para abrir o Google Street View.");
+  }
+  function abrirMapsGoogle() {
+    const lugar = streetViewSelecionado?.lugar;
+    if (!lugar) return;
+    const coordenadasValidas = Number.isFinite(lugar.lat)
+      && Number.isFinite(lugar.lng)
+      && !(lugar.lat === 0 && lugar.lng === 0);
+    const consulta = coordenadasValidas
+      ? `${lugar.lat},${lugar.lng}`
+      : [lugar.nome, lugar.endereco].filter(Boolean).join(", ");
+    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(consulta)}`;
+    const janela = window.open(url, "_blank", "noopener,noreferrer");
+    if (!janela) onToast("Permita pop-ups para abrir o Google Maps.");
   }
   function distanciaTexto(lugar: Lugar): string {
     const referencia = hospedagemBase ?? lugares[0];
@@ -1779,6 +1793,23 @@ function AssistantView({
         ...(recomendacao.avaliacao != null ? { avaliacao: recomendacao.avaliacao } : {}),
         lat: recomendacao.lat!,
         lng: recomendacao.lng!,
+        fonte: recomendacao.evidencia.fonte,
+        consultadoEm: recomendacao.evidencia.consultadoEm,
+        demonstrativo: false,
+      };
+    }
+    if (recomendacao.tipo === "lugar" || recomendacao.tipo === "atividade" || recomendacao.tipo === "hospedagem") {
+      // A IA pode retornar uma recomendação textual antes de o Places
+      // entregar coordenadas. Ainda assim o usuário deve conseguir abrir a
+      // busca oficial do local no Maps e continuar a conferência no Google.
+      return {
+        placeId: recomendacao.placeId || recomendacao.id,
+        nome: recomendacao.titulo,
+        endereco: recomendacao.endereco ?? "",
+        categoria: recomendacao.categoriaLocal ?? "Ponto de interesse",
+        ...(recomendacao.avaliacao != null ? { avaliacao: recomendacao.avaliacao } : {}),
+        lat: 0,
+        lng: 0,
         fonte: recomendacao.evidencia.fonte,
         consultadoEm: recomendacao.evidencia.consultadoEm,
         demonstrativo: false,
@@ -2139,7 +2170,7 @@ function AssistantView({
             <button className="street-view-modal-close" type="button" onClick={() => setStreetViewSelecionado(null)} aria-label="Fechar Street View">
               <X size={18} />
             </button>
-            <span className="section-label">Google Street View</span>
+            <span className="section-label">Google Maps · Street View</span>
             <h2 id="street-view-modal-title">{streetViewSelecionado.lugar.nome}</h2>
             <p>{streetViewSelecionado.lugar.endereco || "Localização consultada no Google Places"}</p>
             {streetViewSelecionado.meta.imagemUrl && (
@@ -2158,6 +2189,7 @@ function AssistantView({
             </div>
             <div className="street-view-modal-actions">
               <button type="button" className="secondary-button" onClick={() => setStreetViewSelecionado(null)}>Fechar</button>
+              <button type="button" className="secondary-button" onClick={abrirMapsGoogle}>Abrir no Google Maps <Map size={15} /></button>
               <button type="button" className="primary-button" onClick={abrirStreetViewGoogle}>Abrir no Google Street View <ArrowRight size={16} /></button>
             </div>
           </div>

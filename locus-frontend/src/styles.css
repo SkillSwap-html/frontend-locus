@@ -96,6 +96,55 @@
   text-decoration: underline;
   background: #fff;
 }
+.map-preview-links {
+  min-height: 0;
+  padding: 13px;
+  background: #f7f5fb;
+}
+.map-preview-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #514791;
+}
+.map-preview-heading strong,
+.map-preview-heading span {
+  display: block;
+}
+.map-preview-heading strong { color: #303654; font-size: 12px; }
+.map-preview-heading span { margin-top: 3px; color: #74768a; font-size: 10px; }
+.map-preview-place-list { display: grid; gap: 7px; margin-top: 11px; }
+.map-preview-place {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid #e0deec;
+  border-radius: 9px;
+  background: #fff;
+  color: #3e465d;
+  font-size: 10px;
+}
+.map-preview-place > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-preview-place > div { display: flex; flex-shrink: 0; gap: 5px; }
+.map-preview-place a,
+.map-preview-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #4d438f;
+  font-size: 10px;
+  text-decoration: none;
+}
+.map-preview-place a:hover,
+.map-preview-actions a:hover { text-decoration: underline; }
+.map-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
 .map-preview-empty {
   display: grid;
   min-height: 92px;
@@ -456,6 +505,7 @@
 }
 .street-view-modal-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 18px;
