@@ -168,7 +168,7 @@ function recomendacaoOferta(
     ...(localizacao?.lng != null ? { lng: localizacao.lng } : {}),
     ...(localizacao?.endereco ? { endereco: localizacao.endereco } : {}),
     categoria,
-    natureza: fonte.includes("simulado") ? "simulado" : "observado",
+    natureza: fonte === "Locus" ? "estimado" : fonte.includes("simulado") ? "simulado" : "observado",
   };
 }
 

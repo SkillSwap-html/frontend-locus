@@ -122,6 +122,7 @@ export interface Lugar {
   nome: string;
   endereco: string;
   categoria: string;
+  tipos?: string[];
   avaliacao?: number;
   nivelPreco?: number;
   distanciaKm?: number;

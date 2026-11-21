@@ -1762,6 +1762,27 @@ h3 {
   gap: 5px;
   flex: 0 0 auto;
 }
+.recommendation-day-picker,
+.place-day-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #7d6b5e;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.recommendation-day-picker {
+  margin-left: auto;
+}
+.recommendation-day-picker select,
+.place-day-picker select {
+  border: 1px solid #d8e0d8;
+  border-radius: 7px;
+  background: #fffefa;
+  color: var(--locus-deep);
+  padding: 5px 6px;
+  font-size: 10px;
+}
 .recommendation-action.recommendation-add {
   background: #e8f1e7;
   border-color: #cfdfcc;

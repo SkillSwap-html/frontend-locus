@@ -44,6 +44,7 @@ function normalizarLugar(raw: unknown): Lugar {
     nome: texto(displayName.text) || texto(value.name) || "Lugar sem nome",
     endereco: texto(value.formattedAddress) || texto(value.shortFormattedAddress),
     categoria: rotuloTipoLugar(types[0]),
+    tipos: types.map(texto).filter(Boolean),
     lat: numero(location.latitude),
     lng: numero(location.longitude),
     descricao: texto(value.editorialSummary),
@@ -395,7 +396,7 @@ function normalizarVoo(raw: unknown, passageirosPadrao = 1): OfertaVoo {
     moeda: texto(price.currency) || "BRL",
     taxas: numero(price.total) - numero(price.base),
     preco: numero(price.total),
-    fonte: value.simulated === true ? "Locus (simulado)" : "Provedor configurado",
+    fonte: value.simulated === true ? "Locus" : "Provedor configurado",
     consultadoEm: new Date().toISOString(),
     historico: [],
   };

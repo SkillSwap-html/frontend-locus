@@ -165,6 +165,34 @@ function ordenarLugares(lugares: Lugar[], referencia?: Pick<Lugar, "lat" | "lng"
   }
   return resultado;
 }
+function lugarEhHospedagem(lugar: Lugar): boolean {
+  const textoLugar = [lugar.nome, lugar.categoria, ...(lugar.tipos ?? [])].join(" ").toLowerCase();
+  return /hotel|hospedagem|pousada|hostel|resort|alojamento|lodging/.test(textoLugar);
+}
+function consultasParaLocais(pergunta: string, destino: string): string[] {
+  if (!destino) return [];
+  const normalizada = pergunta.toLowerCase();
+  const pedeHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/.test(normalizada);
+  const pedePassagem = /passagem|passagens|voo|voos|avião|aviao|aeroporto/.test(normalizada);
+  const pedePraia = /praia|praias|mar|litoral|beach/.test(normalizada);
+  const pedeRestaurante = /restaurante|restaurantes|comida|gastronomia|jantar|almoço|almoco|café|cafe/.test(normalizada);
+  const pedeAtracao = /ponto|turíst|turist|museu|parque|atraç|visitar|roteiro|lugar|lugares|passeio/.test(normalizada);
+  if (pedePassagem && !pedeHospedagem && !pedeAtracao && !pedePraia && !pedeRestaurante) return [];
+  const consultas: string[] = [];
+  if (pedeHospedagem) consultas.push(`hotéis, pousadas e hospedagens reais em ${destino}`);
+  if (pedePraia) consultas.push(`praias reais e lugares para banho em ${destino}`);
+  if (pedeRestaurante) consultas.push(`restaurantes e gastronomia local em ${destino}`);
+  if (pedeAtracao || (!pedeHospedagem && !pedePraia && !pedeRestaurante)) {
+    consultas.push(`pontos turísticos, museus, parques e atrações reais em ${destino}`);
+  }
+  // Um pedido genérico de turismo precisa preencher o chat com categorias
+  // diferentes, mesmo quando a IA devolve uma consulta de hospedagem.
+  if (!pedeHospedagem && (pedeAtracao || pedePraia || pedeRestaurante)) {
+    if (!pedePraia) consultas.push(`praias e atrações naturais em ${destino}`);
+    if (!pedeRestaurante) consultas.push(`restaurantes e gastronomia local em ${destino}`);
+  }
+  return [...new Set(consultas)].slice(0, 4);
+}
 function formatarTransporte(value: string): string {
   return (
     (
@@ -1297,6 +1325,8 @@ function AssistantView({
   const [hospedagemBase, setHospedagemBase] = useState<{ nome: string; lat: number; lng: number } | null>(null);
   const [rota, setRota] = useState<Trecho[]>([]);
   const [enviando, setEnviando] = useState(false);
+  const [diasSelecionados, setDiasSelecionados] = useState<Record<string, number>>({});
+  const [diasLugares, setDiasLugares] = useState<Record<string, number>>({});
   useEffect(() => {
     void lerPreferenciasBackend().then(setPreferencias).catch(() => undefined);
   }, []);
@@ -1307,6 +1337,12 @@ function AssistantView({
     ? (limiteViagem > 0 ? limiteViagem : limitePreferencias > 0 ? limitePreferencias : undefined)
     : undefined;
   const acumulado = viagem ? totalViagem(viagem) : 0;
+  const totalDias = viagem?.dataInicio && viagem?.dataFim
+    ? Math.max(1, Math.floor((new Date(`${viagem.dataFim}T12:00:00`).getTime() - new Date(`${viagem.dataInicio}T12:00:00`).getTime()) / 86400000) + 1)
+    : 1;
+  function diaDaRecomendacao(recomendacao: Recomendacao): number {
+    return Math.max(1, Math.min(totalDias, diasSelecionados[recomendacao.id] ?? recomendacao.dia ?? 1));
+  }
   async function enviar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!texto.trim() || enviando) return;
@@ -1353,11 +1389,11 @@ function AssistantView({
         .map((consulta) => consulta.trim())
         .filter((consulta) => consulta.length > 4)
         .filter((consulta) => !/consultas?\s+(curtas|abaixo)|obter mais detalhes|google places$/i.test(consulta));
-      const pedeAtracoes = /ponto|turíst|praia|museu|restaurante|atraç|lugar|visita|roteiro/i.test(pergunta);
+      const consultasDeCategorias = consultasParaLocais(pergunta, destinoBusca);
       const consultaPadrao = destinoBusca
-        ? `${pedeAtracoes ? "pontos turísticos, praias, museus e atrações" : pergunta} em ${destinoBusca}`
+        ? `${pergunta} em ${destinoBusca}`
         : pergunta;
-      const consultas = [...new Set([...consultasDaIa, pergunta, consultaPadrao])].slice(0, 3);
+      const consultas = [...new Set([...consultasDeCategorias, ...consultasDaIa, consultaPadrao])].slice(0, 4);
       const contextoProximidade = hospedagemBase
         ? ` próximo à hospedagem ${hospedagemBase.nome}`
         : "";
@@ -1380,9 +1416,13 @@ function AssistantView({
       let respostaFinal = resposta;
       if (encontrados.length) {
         const unicos = [...new globalThis.Map(encontrados.map((item) => [item.placeId, item])).values()];
+        const pedidoHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/i.test(pergunta);
+        const locaisRelevantes = pedidoHospedagem
+          ? unicos
+          : unicos.filter((lugar) => !lugarEhHospedagem(lugar));
         const proximos = hospedagemBase
-          ? unicos.filter((lugar) => distanciaKm(hospedagemBase, lugar) <= 20)
-          : unicos;
+          ? locaisRelevantes.filter((lugar) => distanciaKm(hospedagemBase, lugar) <= 20)
+          : locaisRelevantes;
         const organizados = ordenarLugares(proximos, hospedagemBase ?? undefined).slice(0, 12);
         setLugares(organizados);
         setStreetViews({});
@@ -1455,11 +1495,20 @@ function AssistantView({
         ...(hospedagemBase ? { hospedagemBase: hospedagemBase.nome } : {}),
       });
       try {
-        const resultado = await buscaTextual(destinoBusca ? `${pergunta} em ${destinoBusca}` : pergunta);
+        const consultasFallback = consultasParaLocais(pergunta, destinoBusca);
+        const resultado = await Promise.all(
+          [...new Set([...consultasFallback, destinoBusca ? `${pergunta} em ${destinoBusca}` : pergunta])]
+            .slice(0, 4)
+            .map((consulta) => buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }))),
+        ).then((resultados) => ({ lugares: resultados.flatMap((item) => item.lugares) }));
+        const pedidoHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/i.test(pergunta);
+        const locaisRelevantes = pedidoHospedagem
+          ? resultado.lugares
+          : resultado.lugares.filter((lugar) => !lugarEhHospedagem(lugar));
         const locais = ordenarLugares(
           hospedagemBase
-            ? resultado.lugares.filter((lugar) => distanciaKm(hospedagemBase, lugar) <= 20)
-            : resultado.lugares,
+            ? locaisRelevantes.filter((lugar) => distanciaKm(hospedagemBase, lugar) <= 20)
+            : locaisRelevantes,
           hospedagemBase ?? undefined,
         ).slice(0, 6);
         setLugares(locais);
@@ -1591,6 +1640,7 @@ function AssistantView({
       lat: lugar.lat,
       lng: lugar.lng,
       categoriaLocal: lugar.categoria,
+      dia: diasLugares[lugar.placeId] ?? 1,
     });
   }
   function adicionarRecomendacaoControlada(recomendacao: Recomendacao) {
@@ -1676,6 +1726,22 @@ function AssistantView({
                           {recomendacao.valor ? ` · ${brl(recomendacao.valor)}` : ""}
                         </small>
                       </div>
+                      {(recomendacao.tipo === "lugar" || recomendacao.tipo === "atividade") && viagem && (
+                        <label className="recommendation-day-picker">
+                          <span>Adicionar no</span>
+                          <select
+                            value={diaDaRecomendacao(recomendacao)}
+                            onChange={(event) => setDiasSelecionados((atuais) => ({
+                              ...atuais,
+                              [recomendacao.id]: Number(event.target.value),
+                            }))}
+                          >
+                            {Array.from({ length: totalDias }, (_, index) => index + 1).map((dia) => (
+                              <option key={dia} value={dia}>Dia {dia}</option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                       {(() => {
                         const lugar = lugarDaRecomendacao(recomendacao);
                         return (
@@ -1687,7 +1753,12 @@ function AssistantView({
                                   <Eye size={15} /> Visualizar
                                 </button>
                                 <button type="button" className="recommendation-action recommendation-add"
-                                  onClick={() => adicionarRecomendacaoControlada(recomendacao)}>
+                                  onClick={() => adicionarRecomendacaoControlada({
+                                    ...recomendacao,
+                                    ...(recomendacao.tipo === "lugar" || recomendacao.tipo === "atividade"
+                                      ? { dia: diaDaRecomendacao(recomendacao) }
+                                      : {}),
+                                  })}>
                                   <Plus size={15} /> Adicionar
                                 </button>
                               </>
@@ -1777,6 +1848,22 @@ function AssistantView({
                         </small>
                       </span>
                       <div className="place-actions">
+                        {viagem && (
+                          <label className="place-day-picker">
+                            <span>Dia</span>
+                            <select
+                              value={diasLugares[lugar.placeId] ?? 1}
+                              onChange={(event) => setDiasLugares((atuais) => ({
+                                ...atuais,
+                                [lugar.placeId]: Number(event.target.value),
+                              }))}
+                            >
+                              {Array.from({ length: totalDias }, (_, index) => index + 1).map((dia) => (
+                                <option key={dia} value={dia}>{dia}</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                         <button type="button" onClick={() => void revisarLugar(lugar)}>Street View</button>
                         <button type="button" onClick={() => adicionarLugar(lugar)}>{streetViews[lugar.placeId] ? "Adicionar" : "Ver antes"}</button>
                       </div>
@@ -1847,7 +1934,7 @@ function AssistantView({
               {streetViewSelecionado.lugar.avaliacao ? <span>★ {streetViewSelecionado.lugar.avaliacao.toFixed(1)} no Google</span> : <span>Avaliação não informada</span>}
               {streetViewSelecionado.lugar.aberto != null && <span>{streetViewSelecionado.lugar.aberto ? "Aberto agora" : "Fechado agora"}</span>}
             </div>
-            <div className="offer-modal-actions"><a className="secondary-button" href={streetViewSelecionado.meta.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Maps</a><button className="primary-button" type="button" onClick={() => { adicionarRecomendacaoControlada({ id: `lugar-${streetViewSelecionado.lugar.placeId}`, placeId: streetViewSelecionado.lugar.placeId, tipo: "lugar", titulo: streetViewSelecionado.lugar.nome, resumo: `${streetViewSelecionado.lugar.categoria} · ${streetViewSelecionado.lugar.endereco}`, justificativa: "Lugar consultado no Google Places e conferido no Street View.", evidencia: { fonte: streetViewSelecionado.lugar.fonte, consultadoEm: streetViewSelecionado.lugar.consultadoEm }, ...(streetViewSelecionado.lugar.avaliacao ? { avaliacao: streetViewSelecionado.lugar.avaliacao } : {}), endereco: streetViewSelecionado.lugar.endereco, lat: streetViewSelecionado.lugar.lat, lng: streetViewSelecionado.lugar.lng, categoriaLocal: streetViewSelecionado.lugar.categoria, ...(streetViewSelecionado.recomendacao?.dia ? { dia: streetViewSelecionado.recomendacao.dia } : {}) }); setStreetViewSelecionado(null); }}><Plus size={15} /> Adicionar ao roteiro</button></div>
+            <div className="offer-modal-actions"><a className="secondary-button" href={streetViewSelecionado.meta.mapaUrl} target="_blank" rel="noreferrer">Abrir no Google Maps</a><button className="primary-button" type="button" onClick={() => { adicionarRecomendacaoControlada({ id: `lugar-${streetViewSelecionado.lugar.placeId}`, placeId: streetViewSelecionado.lugar.placeId, tipo: "lugar", titulo: streetViewSelecionado.lugar.nome, resumo: `${streetViewSelecionado.lugar.categoria} · ${streetViewSelecionado.lugar.endereco}`, justificativa: "Lugar consultado no Google Places e conferido no Street View.", evidencia: { fonte: streetViewSelecionado.lugar.fonte, consultadoEm: streetViewSelecionado.lugar.consultadoEm }, ...(streetViewSelecionado.lugar.avaliacao ? { avaliacao: streetViewSelecionado.lugar.avaliacao } : {}), endereco: streetViewSelecionado.lugar.endereco, lat: streetViewSelecionado.lugar.lat, lng: streetViewSelecionado.lugar.lng, categoriaLocal: streetViewSelecionado.lugar.categoria, dia: streetViewSelecionado.recomendacao?.dia ?? diasLugares[streetViewSelecionado.lugar.placeId] ?? 1 }); setStreetViewSelecionado(null); }}><Plus size={15} /> Adicionar ao roteiro</button></div>
           </div>
         </div>
       )}

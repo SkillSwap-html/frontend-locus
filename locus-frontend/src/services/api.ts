@@ -102,7 +102,12 @@ function mensagemTecnica(mensagem?: string): boolean {
     || normalizada.includes("column ")
     || normalizada.includes("relation ")
     || normalizada.includes("could not execute")
-    || normalizada.includes("constraint ");
+    || normalizada.includes("constraint ")
+    || normalizada.includes("google maps platform rejected")
+    || normalizada.includes("api key is not authorized")
+    || normalizada.includes("developers.google.com/maps/api-key")
+    || normalizada.includes("request denied")
+    || normalizada.includes("the provided api key");
 }
 
 export async function chamar<T>(fn: () => Promise<{ data: T }>): Promise<T> {
