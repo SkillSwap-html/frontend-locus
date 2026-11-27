@@ -125,6 +125,33 @@ function destinoParaExemplo(consulta: string): CoordenadaDestino {
   };
 }
 
+function lugaresDemonstrativos(consulta: string): Lugar[] {
+  const destino = destinoParaExemplo(consulta);
+  const textoConsulta = normalizarBusca(consulta);
+  const querHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/.test(textoConsulta);
+  const nomes = querHospedagem
+    ? ["Hospedagem central", "Pousada próxima à praia", "Hotel confortável no destino", "Hostel bem localizado"]
+    : ["Praia ou atração natural próxima", "Ponto turístico do centro", "Restaurante recomendado na região", "Museu ou atração cultural"];
+  const categorias = querHospedagem
+    ? ["Hotel", "Pousada", "Hotel", "Hostel"]
+    : ["Praia", "Ponto turístico", "Restaurante", "Museu"];
+  const possuiCoordenadas = destino.lat !== 0 || destino.lng !== 0;
+  const agora = new Date().toISOString();
+  return nomes.map((nome, index) => ({
+    placeId: `demo-${normalizarBusca(destino.nome).replace(/[^a-z0-9]+/g, "-")}-${index}`,
+    nome: `${nome} em ${destino.nome}`,
+    endereco: possuiCoordenadas
+      ? `${destino.nome} · localização de exemplo para planejamento`
+      : `${destino.nome} · confirme a localização no Google Maps`,
+    categoria: categorias[index]!,
+    lat: destino.lat + (index - 1.5) * 0.012,
+    lng: destino.lng + (index % 2 === 0 ? 1 : -1) * (0.014 + index * 0.003),
+    fonte: "Exemplo de planejamento · Google Places temporariamente limitado",
+    consultadoEm: agora,
+    demonstrativo: true,
+  }));
+}
+
 function sugestoesLocaisFallback(valor: string): { id: string; texto: string }[] {
   const consulta = normalizarBusca(valor);
   const conhecidas = SUGESTOES_LOCAIS
@@ -194,8 +221,6 @@ function hospedagensExemplo(params: Record<string, string | number>): OfertaHote
     moeda: "BRL",
     taxas: 0,
     preco: diaria * noites * quartos,
-    precoDiaria: diaria,
-    precoEstimado: true,
     imagemUrl: IMAGENS_HOSPEDAGEM_EXEMPLO[index]!,
     latitude: destino.lat + (index - 1) * 0.008,
     longitude: destino.lng + (index - 1) * 0.009,
@@ -505,7 +530,7 @@ export function respostaLocalAssistente(textoPergunta: string, contexto?: Contex
     id: uid(),
     autor: "assistente",
     texto: destino
-      ? `Entendi. Vou buscar opções reais em ${destino}, organizar por proximidade e separar as sugestões por dia. ${limite}${valores}`
+      ? `Entendi. Vou buscar opções reais em ${destino}, organizar por proximidade e separar as sugestões por dia. ${limite}${valores} Confira os resultados e o Street View antes de adicionar.`
       : "Para montar recomendações reais, preciso saber qual é o destino da viagem. Informe a cidade e o país no chat ou crie uma viagem primeiro.",
     ...(consultas.length ? { consultas } : {}),
     ...(orcamentoSugerido ? { orcamentoSugerido } : {}),
@@ -602,7 +627,7 @@ export async function buscaTextual(q: string): Promise<ResultadoBusca> {
   const cacheado = cacheBusca.get(chave);
   if (cacheado && cacheado.expiraEm > Date.now()) return cacheado.resultado;
   if (placesIndisponivelAte > Date.now()) {
-    const resultado = { lugares: [], fallback: true };
+    const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
     cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   }
@@ -613,13 +638,13 @@ export async function buscaTextual(q: string): Promise<ResultadoBusca> {
     const places = Array.isArray(raw.places) ? raw.places : [];
     const resultado = places.length
       ? { lugares: places.map(normalizarLugar), fallback: false }
-      : { lugares: [], fallback: true };
+      : { lugares: lugaresDemonstrativos(q), fallback: true };
     cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   } catch (error) {
-    if (placesFoiLimitado(error)) {
+    if (placesFoiLimitado(error) || error instanceof LocusError) {
       placesIndisponivelAte = Date.now() + CACHE_PLACES_MS;
-      const resultado = { lugares: [], fallback: true };
+      const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
       cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
       return resultado;
     }
@@ -760,26 +785,22 @@ function normalizarVoo(raw: unknown, passageirosPadrao = 1): OfertaVoo {
   const returnDeparture = objeto(objeto(returnSegments[0]).departure);
   const departure = objeto(first.departure);
   const arrival = objeto(last.arrival);
-  const codigoCompanhia = Array.isArray(value.validatingAirlineCodes)
-    ? texto(value.validatingAirlineCodes[0])
-    : "";
-  const total = numero(price.total);
-  const tarifaBase = numero(price.base, total);
   return {
     id: texto(value.id),
-    companhia: texto(value.airlineName) || codigoCompanhia || "Companhia aérea",
+    companhia:
+      (Array.isArray(value.validatingAirlineCodes) ? texto(value.validatingAirlineCodes[0]) : "") ||
+      "Companhia aérea",
     origem: texto(departure.iataCode),
     destino: texto(arrival.iataCode),
     ida: texto(departure.at),
     volta: texto(returnDeparture.at),
     passageiros: Math.max(1, numero(value.travelerCount) || passageirosPadrao),
-    ...(value.roundTrip === true || itineraries.length > 1 ? { idaEVolta: true } : { idaEVolta: false }),
+    ...(value.roundTrip === true ? { idaEVolta: true } : {}),
     classe: "Econômica",
     bagagem: "Consultar oferta",
     moeda: texto(price.currency) || "BRL",
-    tarifaBase,
-    taxas: Math.max(0, total - tarifaBase),
-    preco: total,
+    taxas: numero(price.total) - numero(price.base),
+    preco: numero(price.total),
     fonte: value.simulated === true ? "Locus" : "Provedor configurado",
     consultadoEm: new Date().toISOString(),
     historico: [],
@@ -844,13 +865,9 @@ export async function buscarHoteis(
         });
         imagemUrl = URL.createObjectURL(imagem.data);
       } catch {
-        // A foto oficial é opcional; usamos uma imagem de apoio para que a
-        // oferta continue visualmente completa.
+        // A foto é opcional; o hotel real continua aparecendo com nome e endereço.
       }
     }
-    const diarias = diariasHospedagemExemplo(cidade);
-    const precoDiaria = diarias[Math.min(index, diarias.length - 1)]!;
-    const preco = noites > 0 ? precoDiaria * noites * quartos : 0;
     return {
       id: texto(value.id) || `hotel-${index}`,
       hotel: texto(displayName.text) || "Hospedagem encontrada no Google",
@@ -864,13 +881,10 @@ export async function buscarHoteis(
       politica: "Consultar oferta",
       moeda: "BRL",
       taxas: 0,
-      // O Places confirma o estabelecimento, mas não fornece tarifa para as
-      // datas. O valor abaixo é uma estimativa transparente para permitir a
-      // montagem do roteiro; não é uma promessa de disponibilidade.
-      preco,
-      precoDiaria,
-      precoEstimado: true,
-      imagemUrl: imagemUrl || IMAGENS_HOSPEDAGEM_EXEMPLO[index % IMAGENS_HOSPEDAGEM_EXEMPLO.length]!,
+      // O Places confirma o estabelecimento, mas não fornece tarifa para as datas.
+      // Não inventamos preço: a tela mostra “Consultar”.
+      preco: 0,
+      ...(imagemUrl ? { imagemUrl } : {}),
       latitude: numero(location.latitude),
       longitude: numero(location.longitude),
       endereco: texto(value.formattedAddress) || texto(value.shortFormattedAddress),

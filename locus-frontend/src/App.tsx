@@ -198,18 +198,38 @@ function formatarMoeda(valor: number, moeda: Moeda): string {
 type CustosEstimados = NonNullable<Recomendacao["custos"]>;
 function estimativasDoLocal(lugar: Lugar, destino: string): { custos: CustosEstimados; totalBrl: number } {
   const textoLugar = [lugar.nome, lugar.categoria, ...(lugar.tipos ?? [])].join(" ").toLowerCase();
-  const moeda = moedaDoDestino(`${destino} ${lugar.endereco ?? ""}`);
+  const destinoCompleto = `${destino} ${lugar.endereco ?? ""}`;
+  const destinoNormalizado = destinoCompleto
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const moeda = moedaDoDestino(destinoCompleto);
+
+  // Estimativas por pessoa e por atividade. Elas não substituem uma tarifa
+  // consultada no local, mas evitam valores simbólicos demais para cidades
+  // turísticas e mantêm a conversão para o orçamento em reais.
   const valores = moeda === "BRL"
-    ? { visitas: 45, alimentacao: 60, transporteLocal: 35, extras: 20 }
-    : { visitas: 15, alimentacao: 20, transporteLocal: 7, extras: 5 };
+    ? { visitas: 65, alimentacao: 115, transporteLocal: 48, extras: 30 }
+    : moeda === "EUR"
+      ? { visitas: 28, alimentacao: 42, transporteLocal: 15, extras: 18 }
+      : { visitas: 30, alimentacao: 45, transporteLocal: 18, extras: 16 };
+
+  const multiplicadorDestino = /paris|londres|london|zurique|zurich|amsterdam|nova york|new york|copenhague|copenhagen/.test(destinoNormalizado)
+    ? 1.2
+    : /lisboa|lisbon|madeira|funchal|salvador|recife|fortaleza|natal/.test(destinoNormalizado)
+      ? 0.9
+      : 1;
+  (Object.keys(valores) as (keyof typeof valores)[]).forEach((categoria) => {
+    valores[categoria] = Math.round(valores[categoria] * multiplicadorDestino);
+  });
   if (/restaurant|restaurante|cafe|cafe|bar|comida|gastronomia/.test(textoLugar)) {
     valores.visitas = 0;
-    valores.alimentacao = moeda === "BRL" ? 90 : 24;
+    valores.alimentacao = moeda === "BRL" ? 135 : moeda === "EUR" ? 48 : 52;
   } else if (/beach|praia|park|parque|natural|praca|praça/.test(textoLugar)) {
     valores.visitas = 0;
-    valores.alimentacao = moeda === "BRL" ? 55 : 16;
+    valores.alimentacao = moeda === "BRL" ? 75 : moeda === "EUR" ? 32 : 35;
   } else if (/museum|museu|tourist|turist|historical|histor|aquarium|aquario/.test(textoLugar)) {
-    valores.visitas = moeda === "BRL" ? 45 : 18;
+    valores.visitas = moeda === "BRL" ? 65 : moeda === "EUR" ? 30 : 32;
   }
   const taxa = TAXAS_CAMBIO_REFERENCIA[moeda];
   const custos = (Object.entries(valores) as [CategoriaOrcamento, number][]).reduce<CustosEstimados>((resultado, [categoria, valor]) => {
@@ -228,15 +248,15 @@ function estimativasDoLocal(lugar: Lugar, destino: string): { custos: CustosEsti
 function estimativaLocal(lugar: Lugar): { categoria: CategoriaOrcamento; valor: number; rotulo: string } {
   const textoLugar = [lugar.nome, lugar.categoria, ...(lugar.tipos ?? [])].join(" ").toLowerCase();
   if (/restaurant|restaurante|cafe|café|bar|comida|gastronomia/.test(textoLugar)) {
-    return { categoria: "alimentacao", valor: 90, rotulo: "estimativa de alimentação por pessoa" };
+    return { categoria: "alimentacao", valor: 135, rotulo: "estimativa de alimentação por pessoa" };
   }
   if (/museum|museu|tourist|turíst|historical|histór|aquarium|aquário/.test(textoLugar)) {
-    return { categoria: "visitas", valor: 45, rotulo: "estimativa de ingresso" };
+    return { categoria: "visitas", valor: 65, rotulo: "estimativa de ingresso" };
   }
   if (/beach|praia|park|parque|natural|praça|praca/.test(textoLugar)) {
     return { categoria: "visitas", valor: 0, rotulo: "gratuito ou preço não informado" };
   }
-  return { categoria: "visitas", valor: 30, rotulo: "estimativa de visita" };
+  return { categoria: "visitas", valor: 55, rotulo: "estimativa de visita" };
 }
 function consultasParaLocais(pergunta: string, destino: string): string[] {
   if (!destino) return [];
@@ -1563,7 +1583,10 @@ function AssistantView({
       const consultaPadrao = destinoBusca
         ? `${pergunta} em ${destinoBusca}`
         : pergunta;
-      const consultas = [...new Set([...consultasDeCategorias, ...consultasDaIa, consultaPadrao])].slice(0, 8);
+      // A consulta digitada pelo viajante vem primeiro. Isso garante que um
+      // lugar nomeado, como "Torre Eiffel", não seja perdido atrás de uma
+      // lista genérica de pontos turísticos de Paris.
+      const consultas = [...new Set([consultaPadrao, ...consultasDeCategorias, ...consultasDaIa])].slice(0, 8);
       const contextoProximidade = hospedagemBase
         ? ` próximo à hospedagem ${hospedagemBase.nome}`
         : "";
@@ -1587,6 +1610,20 @@ function AssistantView({
       let respostaFinal = respostaComOrcamento;
       if (encontrados.length) {
         const unicos = [...new globalThis.Map(encontrados.map((item) => [item.placeId, item])).values()];
+        const termosPedido = pergunta
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter((termo) => termo.length >= 4 && !["quero", "mostre", "mostrar", "ver", "veja", "local", "lugar", "paris"].includes(termo));
+        const pontuacao = (lugar: Lugar) => {
+          const textoLugar = `${lugar.nome} ${lugar.endereco}`
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .toLowerCase();
+          return termosPedido.reduce((total, termo) => total + (textoLugar.includes(termo) ? 1 : 0), 0);
+        };
+        unicos.sort((a, b) => pontuacao(b) - pontuacao(a));
         const pedidoHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/i.test(pergunta);
         const locaisRelevantes = pedidoHospedagem
           ? unicos
@@ -1718,7 +1755,7 @@ function AssistantView({
       try {
         const consultasFallback = consultasParaLocais(pergunta, destinoBusca);
         const resultado = await Promise.all(
-          [...new Set([...consultasFallback, destinoBusca ? `${pergunta} em ${destinoBusca}` : pergunta])]
+          [...new Set([destinoBusca ? `${pergunta} em ${destinoBusca}` : pergunta, ...consultasFallback])]
             .slice(0, 6)
             .map((consulta) => buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }))),
         ).then((resultados) => ({ lugares: resultados.flatMap((item) => item.lugares) }));

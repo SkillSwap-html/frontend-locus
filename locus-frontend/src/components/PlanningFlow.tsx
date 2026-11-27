@@ -374,11 +374,7 @@ export function PlanningFlow({
           {voos.map((voo) => {
             const acima = !podeAdicionar(voo.preco) || passagemAdicionada;
             return <div className={`offer-result ${acima ? "over-budget" : ""}`} key={voo.id}>
-              <div>
-                <strong>{voo.companhia}</strong>
-                <small>{voo.origem} → {voo.destino} · {voo.idaEVolta === false ? "Só ida" : "Ida e volta"} · {voo.passageiros} viajante(s) · {voo.fonte}</small>
-                <span className="offer-price-detail">Tarifa {dinheiro(voo.tarifaBase ?? Math.max(0, voo.preco - voo.taxas), voo.moeda)} + taxas {dinheiro(voo.taxas, voo.moeda)}</span>
-              </div>
+              <div><strong>{voo.companhia}</strong><small>{voo.origem} → {voo.destino} · Ida e volta · {voo.passageiros} viajante(s) · {voo.fonte}</small></div>
               <b>{dinheiro(voo.preco, voo.moeda)}</b>
               <button type="button" disabled={acima} onClick={() => adicionarVoo(voo)}><Check size={14} />{passagemAdicionada ? "Já adicionada" : acima ? "Acima do limite" : "Ver e escolher"}</button>
             </div>;
@@ -402,7 +398,7 @@ export function PlanningFlow({
               const acima = (hotel.preco > 0 && !podeAdicionar(hotel.preco)) || hospedagemAdicionada;
               return <div className={`hotel-offer ${acima ? "over-budget" : ""}`} key={hotel.id}>
                 {hotel.imagemUrl && <img src={hotel.imagemUrl} alt={`Imagem de ${hotel.hotel}`} />}
-                <div className="hotel-offer-body"><strong>{hotel.hotel}</strong><small>{hotel.endereco || cidade} · {hotel.checkin} → {hotel.checkout} · {hotel.noites ?? "—"} noite(s) · {hotel.hospedes} hóspede(s) · {hotel.fonte}</small><b>{hotel.preco ? `${dinheiro(hotel.preco, hotel.moeda)} total` : "Tarifa a consultar"}</b>{hotel.precoDiaria ? <span className="offer-price-detail">{dinheiro(hotel.precoDiaria, hotel.moeda)} por noite · {hotel.precoEstimado ? "estimativa para planejamento" : "tarifa consultada"}</span> : null}<button type="button" disabled={acima} onClick={() => adicionarHotel(hotel)}><BedDouble size={14} />{hospedagemAdicionada ? "Já adicionada" : acima ? "Acima do limite" : "Ver e escolher"}</button></div>
+                <div className="hotel-offer-body"><strong>{hotel.hotel}</strong><small>{hotel.endereco || cidade} · {hotel.checkin} → {hotel.checkout} · {hotel.noites ?? "—"} noite(s) · {hotel.hospedes} hóspede(s) · {hotel.fonte}</small><b>{hotel.preco ? dinheiro(hotel.preco, hotel.moeda) : "Tarifa a consultar"}</b><button type="button" disabled={acima} onClick={() => adicionarHotel(hotel)}><BedDouble size={14} />{hospedagemAdicionada ? "Já adicionada" : acima ? "Acima do limite" : "Ver e escolher"}</button></div>
               </div>;
             })}
           </div>
@@ -418,14 +414,12 @@ export function PlanningFlow({
               <span className="section-label">Hospedagem</span>
               <h3>{ofertaSelecionada.valor.hotel}</h3>
               <p>{ofertaSelecionada.valor.checkin} → {ofertaSelecionada.valor.checkout} · {ofertaSelecionada.valor.quarto}</p>
-              <strong className="offer-modal-price">{ofertaSelecionada.valor.preco ? `${dinheiro(ofertaSelecionada.valor.preco, ofertaSelecionada.valor.moeda)} total` : "Consultar oferta"}</strong>
-              {ofertaSelecionada.valor.precoDiaria ? <small>{dinheiro(ofertaSelecionada.valor.precoDiaria, ofertaSelecionada.valor.moeda)} por noite · {ofertaSelecionada.valor.precoEstimado ? "estimativa para planejamento" : "tarifa consultada"}</small> : null}
+              <strong className="offer-modal-price">{ofertaSelecionada.valor.preco ? dinheiro(ofertaSelecionada.valor.preco, ofertaSelecionada.valor.moeda) : "Consultar oferta"}</strong>
             </> : <>
               <span className="section-label">Passagem</span>
               <h3>{ofertaSelecionada.valor.companhia} · {ofertaSelecionada.valor.origem} → {ofertaSelecionada.valor.destino}</h3>
               <p>Ida: {ofertaSelecionada.valor.ida ? new Date(ofertaSelecionada.valor.ida).toLocaleString("pt-BR") : "Data informada"}<br />Volta: {ofertaSelecionada.valor.volta ? new Date(ofertaSelecionada.valor.volta).toLocaleString("pt-BR") : "Data informada"}<br />Total para {ofertaSelecionada.valor.passageiros} viajante(s)</p>
-              <strong className="offer-modal-price">{dinheiro(ofertaSelecionada.valor.preco, ofertaSelecionada.valor.moeda)} total ida e volta</strong>
-              <small>Tarifa {dinheiro(ofertaSelecionada.valor.tarifaBase ?? Math.max(0, ofertaSelecionada.valor.preco - ofertaSelecionada.valor.taxas), ofertaSelecionada.valor.moeda)} + taxas {dinheiro(ofertaSelecionada.valor.taxas, ofertaSelecionada.valor.moeda)}</small>
+              <strong className="offer-modal-price">{dinheiro(ofertaSelecionada.valor.preco, ofertaSelecionada.valor.moeda)}</strong>
             </>}
             <small className="planning-source">{ofertaSelecionada.valor.fonte}. O valor será somado ao total da viagem.</small>
             <div className="offer-modal-actions"><button className="secondary-button" type="button" onClick={() => setOfertaSelecionada(null)}>Voltar</button><button className="primary-button" type="button" onClick={confirmarOferta}><Check size={15} /> Adicionar ao roteiro</button></div>
