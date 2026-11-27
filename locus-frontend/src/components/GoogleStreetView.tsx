@@ -26,6 +26,8 @@ export function GoogleStreetView({
     void carregarGoogleMaps()
       .then((google) => {
         if (!ativo || !elementRef.current) return;
+        const panoramaEncontrado = (status: string | undefined) =>
+          status === "OK" || status === google.maps.StreetViewStatus?.OK;
         const criarPanorama = (position: { lat: number; lng: number }) => {
           if (!ativo || !elementRef.current) return;
           const panorama = new google.maps.StreetViewPanorama(elementRef.current, {
@@ -42,31 +44,38 @@ export function GoogleStreetView({
             const status = panorama.getStatus?.();
             if (!ativo) return;
             setCarregando(false);
-            if (status && status !== google.maps.StreetViewStatus?.OK) {
+            if (status && !panoramaEncontrado(status)) {
               setErro("O Google não encontrou uma panorâmica próxima deste ponto.");
               setMostrarImagem(Boolean(imagemUrl));
             }
           });
         };
-        // O ponto turístico pode não ter uma foto exatamente nas coordenadas
-        // retornadas pelo Places. O serviço oficial procura a panorâmica mais
-        // próxima para evitar o falso erro visto em praias e calçadões.
-        new google.maps.StreetViewService().getPanorama(
-          // Atrações podem ter uma panorâmica interna ou de usuário próxima;
-          // restringir a busca a imagens externas fazia alguns locais falharem.
-          { location: { lat, lng }, radius: 5000 },
-          (data, status) => {
-            if (!ativo) return;
-            const position = data?.location?.latLng;
-            if (status === google.maps.StreetViewStatus?.OK && position) {
-              criarPanorama(position);
-            } else {
-              setCarregando(false);
-              setErro("O Google não encontrou uma panorâmica pública próxima deste ponto.");
-              setMostrarImagem(Boolean(imagemUrl));
-            }
-          },
-        );
+        const procurarPanorama = (raios: number[], indice = 0) => {
+          if (!ativo) return;
+          const raio = raios[indice];
+          if (!raio) {
+            setCarregando(false);
+            setErro("O Google não encontrou uma panorâmica pública próxima deste ponto.");
+            setMostrarImagem(Boolean(imagemUrl));
+            return;
+          }
+          // O ponto do Places pode ficar dentro de uma atração. Tentamos
+          // primeiro perto do endereço e ampliamos somente se necessário,
+          // sempre usando a posição retornada pelo Street View.
+          new google.maps.StreetViewService().getPanorama(
+            { location: { lat, lng }, radius: raio },
+            (data, status) => {
+              if (!ativo) return;
+              const position = data?.location?.latLng;
+              if (panoramaEncontrado(status) && position) {
+                criarPanorama(position);
+                return;
+              }
+              procurarPanorama(raios, indice + 1);
+            },
+          );
+        };
+        procurarPanorama([5000, 15000, 30000]);
       })
       .catch((error: unknown) => {
         if (ativo) {
