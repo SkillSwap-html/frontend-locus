@@ -144,8 +144,12 @@ function lugaresDemonstrativos(consulta: string): Lugar[] {
       ? `${destino.nome} · localização de exemplo para planejamento`
       : `${destino.nome} · confirme a localização no Google Maps`,
     categoria: categorias[index]!,
-    lat: destino.lat + (index - 1.5) * 0.012,
-    lng: destino.lng + (index % 2 === 0 ? 1 : -1) * (0.014 + index * 0.003),
+    // Quando o destino não foi geocodificado, não invente coordenadas perto
+    // de 0,0: isso abre o mapa no oceano e deixa o Street View sem panorama.
+    lat: possuiCoordenadas ? destino.lat + (index - 1.5) * 0.012 : Number.NaN,
+    lng: possuiCoordenadas
+      ? destino.lng + (index % 2 === 0 ? 1 : -1) * (0.014 + index * 0.003)
+      : Number.NaN,
     fonte: "Exemplo de planejamento · Google Places temporariamente limitado",
     consultadoEm: agora,
     demonstrativo: true,
@@ -532,7 +536,7 @@ export function respostaLocalAssistente(textoPergunta: string, contexto?: Contex
     id: uid(),
     autor: "assistente",
     texto: destino
-      ? `Entendi. Vou buscar opções reais em ${destino}, organizar por proximidade e separar as sugestões por dia. ${limite}${valores} Confira os resultados e o Street View antes de adicionar.`
+      ? `Entendi. Vou buscar opções reais em ${destino}, organizar por proximidade e separar as sugestões por dia. ${limite}${valores}`
       : "Para montar recomendações reais, preciso saber qual é o destino da viagem. Informe a cidade e o país no chat ou crie uma viagem primeiro.",
     ...(consultas.length ? { consultas } : {}),
     ...(orcamentoSugerido ? { orcamentoSugerido } : {}),

@@ -148,6 +148,7 @@ function itensParaResumo(viagem: Viagem): ItemOrcamento[] {
   return [...(viagem.orcamento ?? []), ...roteiro];
 }
 function distanciaKm(a: Pick<Lugar, "lat" | "lng">, b: Pick<Lugar, "lat" | "lng">): number {
+  if (![a.lat, a.lng, b.lat, b.lng].every(Number.isFinite)) return Number.POSITIVE_INFINITY;
   const raio = 6371;
   const latitude = ((b.lat - a.lat) * Math.PI) / 180;
   const longitude = ((b.lng - a.lng) * Math.PI) / 180;
@@ -158,9 +159,10 @@ function distanciaKm(a: Pick<Lugar, "lat" | "lng">, b: Pick<Lugar, "lat" | "lng"
 }
 function ordenarLugares(lugares: Lugar[], referencia?: Pick<Lugar, "lat" | "lng">): Lugar[] {
   if (lugares.length < 2) return lugares;
+  if (!lugares.some((lugar) => Number.isFinite(lugar.lat) && Number.isFinite(lugar.lng))) return lugares;
   const primeiro = referencia
     ? [...lugares].sort((a, b) => distanciaKm(referencia, a) - distanciaKm(referencia, b))[0]!
-    : lugares[0]!;
+    : lugares.find((lugar) => Number.isFinite(lugar.lat) && Number.isFinite(lugar.lng)) ?? lugares[0]!;
   const resultado: Lugar[] = [{
     ...primeiro,
     ...(referencia ? { distanciaKm: distanciaKm(referencia, primeiro) } : {}),
@@ -306,7 +308,7 @@ function rotuloCategoria(value: CategoriaOrcamento): string {
   return CATEGORIAS.find((item) => item.id === value)?.rotulo ?? value;
 }
 function estrelasAvaliacao(avaliacao?: number): string {
-  if (avaliacao == null || !Number.isFinite(avaliacao)) return "";
+  if (avaliacao == null || !Number.isFinite(avaliacao)) return "☆☆☆☆☆ · sem avaliação";
   const preenchidas = Math.max(0, Math.min(5, Math.round(avaliacao)));
   return `${"★".repeat(preenchidas)}${"☆".repeat(5 - preenchidas)} ${avaliacao.toFixed(1)}`;
 }
@@ -1654,14 +1656,14 @@ function AssistantView({
           const custoPrincipal = estimativas.custos[estimativa.categoria];
           const origemConsulta = placesEmFallback
             ? "Opção de exemplo para manter o planejamento enquanto a cota do Google Places é recomposta."
-            : "Encontrado no Google Places.";
+            : "Local consultado no Google Places.";
           return {
           id: `lugar-${lugar.placeId}`,
           placeId: lugar.placeId,
           tipo: "lugar",
           titulo: lugar.nome,
           resumo: `${lugar.categoria} · ${lugar.endereco || "localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""}${valorDaCategoria > 0 && custoPrincipal ? ` · ${formatarMoeda(custoPrincipal.valor, custoPrincipal.moeda)} ≈ ${brl(valorDaCategoria)} (${estimativa.rotulo})` : ` · ${estimativa.rotulo}`}`,
-          justificativa: `${hospedagemBase ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}. ` : ""}${origemConsulta} Confira o Street View antes de adicionar. O valor é uma estimativa e será somado somente se você adicionar o local.`,
+          justificativa: `${hospedagemBase ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}. ` : ""}${origemConsulta}`,
           evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
           categoria: estimativa.categoria,
           custos: estimativas.custos,
@@ -1781,8 +1783,8 @@ function AssistantView({
           titulo: lugar.nome,
           resumo: `${lugar.categoria} · ${lugar.endereco || "Localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""} · custos estimados em ${estimativas.custos.visitas?.moeda ?? "USD"}`,
           justificativa: hospedagemBase
-            ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem. Confira no Street View antes de escolher. O valor é uma estimativa.`
-            : "Resultado real consultado no Google Places. Confira no Street View antes de escolher. O valor é uma estimativa.",
+            ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem.`
+            : "Resultado consultado no Google Places.",
           evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
           categoria: estimativa.categoria,
           custos: estimativas.custos,
@@ -1900,6 +1902,7 @@ function AssistantView({
     });
   }
   function distanciaTexto(lugar: Lugar): string {
+    if (!Number.isFinite(lugar.lat) || !Number.isFinite(lugar.lng)) return "Localização não confirmada";
     const referencia = hospedagemBase ?? lugares[0];
     if (!referencia || ("placeId" in referencia && referencia.placeId === lugar.placeId)) return "Ponto de referência";
     const distancia = distanciaKm(referencia, lugar);
@@ -1949,7 +1952,7 @@ function AssistantView({
   }
   function adicionarLugar(lugar: Lugar) {
     if (!streetViews[lugar.placeId]) {
-      onToast("Confira o Street View antes de adicionar este lugar ao roteiro.");
+      onToast("Visualize o local antes de adicionar este lugar ao roteiro.");
       void revisarLugar(lugar);
       return;
     }
@@ -2088,11 +2091,14 @@ function AssistantView({
                     <div className="recommendation" key={recomendacao.id}>
                       <div>
                         <strong>{recomendacao.titulo}</strong>
-                        {recomendacao.avaliacao != null && (
-                          <span className="recommendation-rating" aria-label={`Avaliação ${recomendacao.avaliacao.toFixed(1)} de 5`}>
-                            {estrelasAvaliacao(recomendacao.avaliacao)}
-                          </span>
-                        )}
+                        <span
+                          className="recommendation-rating"
+                          aria-label={recomendacao.avaliacao != null
+                            ? `Avaliação ${recomendacao.avaliacao.toFixed(1)} de 5`
+                            : "Avaliação não informada"}
+                        >
+                          {estrelasAvaliacao(recomendacao.avaliacao)}
+                        </span>
                         <span>{recomendacao.resumo}</span>
                         <small className="recommendation-address">
                           {recomendacao.endereco
@@ -2267,7 +2273,7 @@ function AssistantView({
                       <span>
                         <strong>{lugar.nome}</strong>
                         <small>
-                          {lugar.categoria}{lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""} · {distanciaTexto(lugar)}
+                          {lugar.categoria} · {estrelasAvaliacao(lugar.avaliacao)} · {distanciaTexto(lugar)}
                         </small>
                       </span>
                       <div className="place-actions">
@@ -2363,6 +2369,8 @@ function AssistantView({
               />
             ) : (
               <GoogleStreetView
+                nome={streetViewSelecionado.lugar.nome}
+                endereco={streetViewSelecionado.lugar.endereco}
                 lat={streetViewSelecionado.lugar.lat}
                 lng={streetViewSelecionado.lugar.lng}
                 imagemUrl={streetViewSelecionado.meta.imagemUrl}

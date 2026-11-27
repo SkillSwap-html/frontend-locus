@@ -12,9 +12,18 @@ export function GoogleEmbedMap({
   lng: number;
 }) {
   const chave = chaveGoogleMapsEmbed();
-  const consulta = [nome, endereco, `${lat},${lng}`].filter(Boolean).join(", ");
-  const src = chave
-    ? urlGoogleMapsEmbed("place", { q: consulta })
+  const temCoordenadas = Number.isFinite(lat) && Number.isFinite(lng);
+  const consulta = [nome, endereco, ...(temCoordenadas ? [`${lat},${lng}`] : [])]
+    .filter(Boolean)
+    .join(", ");
+  const src = chave && (temCoordenadas || consulta)
+    ? temCoordenadas
+      ? urlGoogleMapsEmbed("view", {
+          center: `${lat},${lng}`,
+          zoom: "16",
+          maptype: "roadmap",
+        })
+      : urlGoogleMapsEmbed("place", { q: consulta })
     : "";
 
   return (

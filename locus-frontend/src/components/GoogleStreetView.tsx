@@ -1,20 +1,26 @@
 import { chaveGoogleMapsEmbed, urlGoogleMapsEmbed } from "@/services/googleMapsEmbed";
 
 export function GoogleStreetView({
+  nome,
+  endereco,
   lat,
   lng,
   className = "street-view-frame",
   imagemUrl: _imagemUrl,
 }: {
+  nome?: string;
+  endereco?: string;
   lat: number;
   lng: number;
   className?: string;
   imagemUrl?: string | undefined;
 }) {
   const chave = chaveGoogleMapsEmbed();
+  const consulta = [nome, endereco].filter((valor) => valor?.trim()).join(", ");
+  const location = consulta || `${lat},${lng}`;
   const src = chave
     ? urlGoogleMapsEmbed("streetview", {
-        location: `${lat},${lng}`,
+        location,
         heading: "0",
         pitch: "0",
         fov: "90",
