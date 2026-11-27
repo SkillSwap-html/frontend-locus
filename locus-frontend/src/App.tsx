@@ -148,7 +148,6 @@ function itensParaResumo(viagem: Viagem): ItemOrcamento[] {
   return [...(viagem.orcamento ?? []), ...roteiro];
 }
 function distanciaKm(a: Pick<Lugar, "lat" | "lng">, b: Pick<Lugar, "lat" | "lng">): number {
-  if (![a.lat, a.lng, b.lat, b.lng].every(Number.isFinite)) return Number.POSITIVE_INFINITY;
   const raio = 6371;
   const latitude = ((b.lat - a.lat) * Math.PI) / 180;
   const longitude = ((b.lng - a.lng) * Math.PI) / 180;
@@ -159,10 +158,9 @@ function distanciaKm(a: Pick<Lugar, "lat" | "lng">, b: Pick<Lugar, "lat" | "lng"
 }
 function ordenarLugares(lugares: Lugar[], referencia?: Pick<Lugar, "lat" | "lng">): Lugar[] {
   if (lugares.length < 2) return lugares;
-  if (!lugares.some((lugar) => Number.isFinite(lugar.lat) && Number.isFinite(lugar.lng))) return lugares;
   const primeiro = referencia
     ? [...lugares].sort((a, b) => distanciaKm(referencia, a) - distanciaKm(referencia, b))[0]!
-    : lugares.find((lugar) => Number.isFinite(lugar.lat) && Number.isFinite(lugar.lng)) ?? lugares[0]!;
+    : lugares[0]!;
   const resultado: Lugar[] = [{
     ...primeiro,
     ...(referencia ? { distanciaKm: distanciaKm(referencia, primeiro) } : {}),
@@ -200,38 +198,18 @@ function formatarMoeda(valor: number, moeda: Moeda): string {
 type CustosEstimados = NonNullable<Recomendacao["custos"]>;
 function estimativasDoLocal(lugar: Lugar, destino: string): { custos: CustosEstimados; totalBrl: number } {
   const textoLugar = [lugar.nome, lugar.categoria, ...(lugar.tipos ?? [])].join(" ").toLowerCase();
-  const destinoCompleto = `${destino} ${lugar.endereco ?? ""}`;
-  const destinoNormalizado = destinoCompleto
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  const moeda = moedaDoDestino(destinoCompleto);
-
-  // Estimativas por pessoa e por atividade. Elas não substituem uma tarifa
-  // consultada no local, mas evitam valores simbólicos demais para cidades
-  // turísticas e mantêm a conversão para o orçamento em reais.
+  const moeda = moedaDoDestino(`${destino} ${lugar.endereco ?? ""}`);
   const valores = moeda === "BRL"
-    ? { visitas: 65, alimentacao: 115, transporteLocal: 48, extras: 30 }
-    : moeda === "EUR"
-      ? { visitas: 28, alimentacao: 42, transporteLocal: 15, extras: 18 }
-      : { visitas: 30, alimentacao: 45, transporteLocal: 18, extras: 16 };
-
-  const multiplicadorDestino = /paris|londres|london|zurique|zurich|amsterdam|nova york|new york|copenhague|copenhagen/.test(destinoNormalizado)
-    ? 1.2
-    : /lisboa|lisbon|madeira|funchal|salvador|recife|fortaleza|natal/.test(destinoNormalizado)
-      ? 0.9
-      : 1;
-  (Object.keys(valores) as (keyof typeof valores)[]).forEach((categoria) => {
-    valores[categoria] = Math.round(valores[categoria] * multiplicadorDestino);
-  });
+    ? { visitas: 45, alimentacao: 60, transporteLocal: 35, extras: 20 }
+    : { visitas: 15, alimentacao: 20, transporteLocal: 7, extras: 5 };
   if (/restaurant|restaurante|cafe|cafe|bar|comida|gastronomia/.test(textoLugar)) {
     valores.visitas = 0;
-    valores.alimentacao = moeda === "BRL" ? 135 : moeda === "EUR" ? 48 : 52;
+    valores.alimentacao = moeda === "BRL" ? 90 : 24;
   } else if (/beach|praia|park|parque|natural|praca|praça/.test(textoLugar)) {
     valores.visitas = 0;
-    valores.alimentacao = moeda === "BRL" ? 75 : moeda === "EUR" ? 32 : 35;
+    valores.alimentacao = moeda === "BRL" ? 55 : 16;
   } else if (/museum|museu|tourist|turist|historical|histor|aquarium|aquario/.test(textoLugar)) {
-    valores.visitas = moeda === "BRL" ? 65 : moeda === "EUR" ? 30 : 32;
+    valores.visitas = moeda === "BRL" ? 45 : 18;
   }
   const taxa = TAXAS_CAMBIO_REFERENCIA[moeda];
   const custos = (Object.entries(valores) as [CategoriaOrcamento, number][]).reduce<CustosEstimados>((resultado, [categoria, valor]) => {
@@ -250,15 +228,15 @@ function estimativasDoLocal(lugar: Lugar, destino: string): { custos: CustosEsti
 function estimativaLocal(lugar: Lugar): { categoria: CategoriaOrcamento; valor: number; rotulo: string } {
   const textoLugar = [lugar.nome, lugar.categoria, ...(lugar.tipos ?? [])].join(" ").toLowerCase();
   if (/restaurant|restaurante|cafe|café|bar|comida|gastronomia/.test(textoLugar)) {
-    return { categoria: "alimentacao", valor: 135, rotulo: "estimativa de alimentação por pessoa" };
+    return { categoria: "alimentacao", valor: 90, rotulo: "estimativa de alimentação por pessoa" };
   }
   if (/museum|museu|tourist|turíst|historical|histór|aquarium|aquário/.test(textoLugar)) {
-    return { categoria: "visitas", valor: 65, rotulo: "estimativa de ingresso" };
+    return { categoria: "visitas", valor: 45, rotulo: "estimativa de ingresso" };
   }
   if (/beach|praia|park|parque|natural|praça|praca/.test(textoLugar)) {
     return { categoria: "visitas", valor: 0, rotulo: "gratuito ou preço não informado" };
   }
-  return { categoria: "visitas", valor: 55, rotulo: "estimativa de visita" };
+  return { categoria: "visitas", valor: 30, rotulo: "estimativa de visita" };
 }
 function consultasParaLocais(pergunta: string, destino: string): string[] {
   if (!destino) return [];
@@ -1585,10 +1563,7 @@ function AssistantView({
       const consultaPadrao = destinoBusca
         ? `${pergunta} em ${destinoBusca}`
         : pergunta;
-      // A consulta digitada pelo viajante vem primeiro. Isso garante que um
-      // lugar nomeado, como "Torre Eiffel", não seja perdido atrás de uma
-      // lista genérica de pontos turísticos de Paris.
-      const consultas = [...new Set([consultaPadrao, ...consultasDeCategorias, ...consultasDaIa])].slice(0, 8);
+      const consultas = [...new Set([...consultasDeCategorias, ...consultasDaIa, consultaPadrao])].slice(0, 8);
       const contextoProximidade = hospedagemBase
         ? ` próximo à hospedagem ${hospedagemBase.nome}`
         : "";
@@ -1607,33 +1582,11 @@ function AssistantView({
           }),
         ),
       );
-      // Cartões do planejamento só podem nascer de resultados reais do
-      // Places. O fallback local não possui endereço, nota ou coordenadas
-      // confiáveis e não deve ser usado para abrir mapa ou Street View.
-      const encontrados = resultados
-        .filter((item) => !item.fallback)
-        .flatMap((item) => item.lugares)
-        .filter((lugar) => lugar.endereco.trim()
-          && Number.isFinite(lugar.lat)
-          && Number.isFinite(lugar.lng));
-      const placesEmFallback = resultados.length > 0 && resultados.every((item) => item.fallback);
+      const encontrados = resultados.flatMap((item) => item.lugares);
+      const placesEmFallback = resultados.some((item) => item.fallback);
       let respostaFinal = respostaComOrcamento;
       if (encontrados.length) {
         const unicos = [...new globalThis.Map(encontrados.map((item) => [item.placeId, item])).values()];
-        const termosPedido = pergunta
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase()
-          .split(/[^a-z0-9]+/)
-          .filter((termo) => termo.length >= 4 && !["quero", "mostre", "mostrar", "ver", "veja", "local", "lugar", "paris"].includes(termo));
-        const pontuacao = (lugar: Lugar) => {
-          const textoLugar = `${lugar.nome} ${lugar.endereco}`
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .toLowerCase();
-          return termosPedido.reduce((total, termo) => total + (textoLugar.includes(termo) ? 1 : 0), 0);
-        };
-        unicos.sort((a, b) => pontuacao(b) - pontuacao(a));
         const pedidoHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/i.test(pergunta);
         const locaisRelevantes = pedidoHospedagem
           ? unicos
@@ -1664,14 +1617,14 @@ function AssistantView({
           const custoPrincipal = estimativas.custos[estimativa.categoria];
           const origemConsulta = placesEmFallback
             ? "Opção de exemplo para manter o planejamento enquanto a cota do Google Places é recomposta."
-            : "Local consultado no Google Places.";
+            : "Encontrado no Google Places; confira o Street View antes de adicionar.";
           return {
           id: `lugar-${lugar.placeId}`,
           placeId: lugar.placeId,
           tipo: "lugar",
           titulo: lugar.nome,
           resumo: `${lugar.categoria} · ${lugar.endereco || "localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""}${valorDaCategoria > 0 && custoPrincipal ? ` · ${formatarMoeda(custoPrincipal.valor, custoPrincipal.moeda)} ≈ ${brl(valorDaCategoria)} (${estimativa.rotulo})` : ` · ${estimativa.rotulo}`}`,
-          justificativa: `${hospedagemBase ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}. ` : ""}${origemConsulta}`,
+          justificativa: `${hospedagemBase ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}. ` : ""}${origemConsulta} Confira o Street View antes de adicionar. O valor é uma estimativa e será somado somente se você adicionar o local.`,
           evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
           categoria: estimativa.categoria,
           custos: estimativas.custos,
@@ -1686,8 +1639,7 @@ function AssistantView({
           dia: Math.min(diasDeViagem, Math.floor(index / 3) + 1),
           };
         });
-        const recomendacoesDaIa = (respostaComOrcamento.recomendacoes ?? [])
-          .filter((recomendacao) => Boolean(recomendacao.endereco?.trim()));
+        const recomendacoesDaIa = respostaComOrcamento.recomendacoes ?? [];
         const recomendacoesDaIaComCustos = recomendacoesDaIa.map((recomendacao) => {
           const lugar = lugarDaRecomendacao(recomendacao);
           if (!lugar) return recomendacao;
@@ -1718,16 +1670,14 @@ function AssistantView({
       } else {
         setLugares([]);
         setRota([]);
-        const recomendacoesDaIaComCustos = respostaComOrcamento.recomendacoes
-          ?.filter((recomendacao) => Boolean(recomendacao.endereco?.trim()))
-          .map((recomendacao) => {
+        const recomendacoesDaIaComCustos = respostaComOrcamento.recomendacoes?.map((recomendacao) => {
           const lugar = lugarDaRecomendacao(recomendacao);
           if (!lugar) return recomendacao;
           return {
             ...recomendacao,
             custos: recomendacao.custos ?? estimativasDoLocal(lugar, destinoBusca).custos,
           };
-          });
+        });
         const possuiRecomendacoesDaIa = Boolean(recomendacoesDaIaComCustos?.length);
         respostaFinal = {
           ...respostaComOrcamento,
@@ -1768,7 +1718,7 @@ function AssistantView({
       try {
         const consultasFallback = consultasParaLocais(pergunta, destinoBusca);
         const resultado = await Promise.all(
-          [...new Set([destinoBusca ? `${pergunta} em ${destinoBusca}` : pergunta, ...consultasFallback])]
+          [...new Set([...consultasFallback, destinoBusca ? `${pergunta} em ${destinoBusca}` : pergunta])]
             .slice(0, 6)
             .map((consulta) => buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }))),
         ).then((resultados) => ({ lugares: resultados.flatMap((item) => item.lugares) }));
@@ -1794,8 +1744,8 @@ function AssistantView({
           titulo: lugar.nome,
           resumo: `${lugar.categoria} · ${lugar.endereco || "Localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""} · custos estimados em ${estimativas.custos.visitas?.moeda ?? "USD"}`,
           justificativa: hospedagemBase
-            ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem.`
-            : "Resultado consultado no Google Places.",
+            ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem. Confira no Street View antes de escolher. O valor é uma estimativa.`
+            : "Resultado real consultado no Google Places. Confira no Street View antes de escolher. O valor é uma estimativa.",
           evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
           categoria: estimativa.categoria,
           custos: estimativas.custos,
@@ -1828,14 +1778,9 @@ function AssistantView({
     try {
       const destinoBusca = viagem?.destino || preferencias?.destino || "";
       const resultado = await buscaTextual(destinoBusca ? `${busca} em ${destinoBusca}` : busca);
-      const lugaresReais = resultado.fallback
-        ? []
-        : resultado.lugares.filter((lugar) => lugar.endereco.trim()
-          && Number.isFinite(lugar.lat)
-          && Number.isFinite(lugar.lng));
       const proximos = hospedagemBase
-        ? lugaresReais.filter((lugar) => distanciaKm(hospedagemBase, lugar) <= 20)
-        : lugaresReais;
+        ? resultado.lugares.filter((lugar) => distanciaKm(hospedagemBase, lugar) <= 20)
+        : resultado.lugares;
       const organizados = ordenarLugares(proximos, hospedagemBase ?? undefined);
       setLugares(organizados);
       if (!organizados.length) {
@@ -1918,7 +1863,6 @@ function AssistantView({
     });
   }
   function distanciaTexto(lugar: Lugar): string {
-    if (!Number.isFinite(lugar.lat) || !Number.isFinite(lugar.lng)) return "Localização não confirmada";
     const referencia = hospedagemBase ?? lugares[0];
     if (!referencia || ("placeId" in referencia && referencia.placeId === lugar.placeId)) return "Ponto de referência";
     const distancia = distanciaKm(referencia, lugar);
@@ -1968,7 +1912,7 @@ function AssistantView({
   }
   function adicionarLugar(lugar: Lugar) {
     if (!streetViews[lugar.placeId]) {
-      onToast("Visualize o local antes de adicionar este lugar ao roteiro.");
+      onToast("Confira o Street View antes de adicionar este lugar ao roteiro.");
       void revisarLugar(lugar);
       return;
     }

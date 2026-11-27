@@ -463,7 +463,6 @@
 .offer-result strong, .offer-result small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .offer-result strong { color: var(--locus-deep); font-size: 11px; }
 .offer-result small { color: #948a81; font-size: 9px; }
-.offer-price-detail { color: #8e847c; font-size: 9px; }
 .offer-result b { color: #9b5e4b; font-size: 11px; }
 .offer-result button { grid-column: 1 / -1; justify-self: stretch; border: 0; border-radius: 7px; padding: 7px; background: #edf1ea; color: var(--locus-deep); font-size: 10px; }
 .offer-result button:disabled { background: #f3e7e2; color: #a78b80; cursor: not-allowed; }
@@ -852,7 +851,6 @@ button {
 .hotel-offer-body strong { color: var(--locus-deep); font-size: 11px; }
 .hotel-offer-body small { color: #8c958f; font-size: 9px; }
 .hotel-offer-body b { color: #a66451; font-size: 12px; }
-.hotel-offer-body .offer-price-detail { display: block; }
 .hotel-offer-body button { display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 29px; border: 0; border-radius: 7px; background: #eaf2e9; color: #38634e; font-size: 10px; }
 .hotel-offer.over-budget, .offer-result.over-budget { opacity: .65; }
 .offer-modal-backdrop { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(39, 52, 59, .34); }
