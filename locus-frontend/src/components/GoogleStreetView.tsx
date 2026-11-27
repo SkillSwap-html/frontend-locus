@@ -15,12 +15,14 @@ export function GoogleStreetView({
   const elementRef = useRef<HTMLDivElement | null>(null);
   const [erro, setErro] = useState("");
   const [mostrarImagem, setMostrarImagem] = useState(false);
+  const [carregando, setCarregando] = useState(true);
 
   useEffect(() => {
     let ativo = true;
     if (!elementRef.current) return undefined;
     setErro("");
     setMostrarImagem(false);
+    setCarregando(true);
     void carregarGoogleMaps()
       .then((google) => {
         if (!ativo || !elementRef.current) return;
@@ -38,7 +40,9 @@ export function GoogleStreetView({
           });
           panorama.addListener("status_changed", () => {
             const status = panorama.getStatus?.();
-            if (status && status !== google.maps.StreetViewStatus?.OK && ativo) {
+            if (!ativo) return;
+            setCarregando(false);
+            if (status && status !== google.maps.StreetViewStatus?.OK) {
               setErro("O Google não encontrou uma panorâmica próxima deste ponto.");
               setMostrarImagem(Boolean(imagemUrl));
             }
@@ -48,13 +52,16 @@ export function GoogleStreetView({
         // retornadas pelo Places. O serviço oficial procura a panorâmica mais
         // próxima para evitar o falso erro visto em praias e calçadões.
         new google.maps.StreetViewService().getPanorama(
-          { location: { lat, lng }, radius: 2500, source: "OUTDOOR" },
+          // Atrações podem ter uma panorâmica interna ou de usuário próxima;
+          // restringir a busca a imagens externas fazia alguns locais falharem.
+          { location: { lat, lng }, radius: 5000 },
           (data, status) => {
             if (!ativo) return;
             const position = data?.location?.latLng;
             if (status === google.maps.StreetViewStatus?.OK && position) {
               criarPanorama(position);
             } else {
+              setCarregando(false);
               setErro("O Google não encontrou uma panorâmica pública próxima deste ponto.");
               setMostrarImagem(Boolean(imagemUrl));
             }
@@ -63,6 +70,7 @@ export function GoogleStreetView({
       })
       .catch((error: unknown) => {
         if (ativo) {
+          setCarregando(false);
           setErro(error instanceof Error ? error.message : "O Street View não pôde ser carregado.");
           setMostrarImagem(Boolean(imagemUrl));
         }
@@ -74,6 +82,7 @@ export function GoogleStreetView({
 
   return (
     <div className={`${className} street-view-google`}>
+      <div ref={elementRef} className={`street-view-google-canvas ${mostrarImagem ? "is-hidden" : ""}`} />
       {mostrarImagem && imagemUrl ? (
         <img
           className="street-view-google-image"
@@ -84,8 +93,9 @@ export function GoogleStreetView({
             setErro("A imagem do Street View não pôde ser carregada.");
           }}
         />
-      ) : <div ref={elementRef} className="street-view-google-canvas" />}
-      {erro && !mostrarImagem && <div className="street-view-error">{erro}</div>}
+      ) : null}
+      {carregando && <div className="street-view-loading">Carregando a panorâmica mais próxima deste local...</div>}
+      {erro && !carregando && !mostrarImagem && <div className="street-view-error">{erro}</div>}
     </div>
   );
 }

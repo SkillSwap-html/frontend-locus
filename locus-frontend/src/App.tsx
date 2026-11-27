@@ -2216,9 +2216,7 @@ function AssistantView({
             <div className="street-view-modal-status">
               {modoVisualizacao === "mapa"
                 ? "Mapa carregado dentro da plataforma. Use os controles do próprio mapa para conferir a posição do local."
-                : streetViewSelecionado.meta.status === "OK"
-                  ? "Panorâmica encontrada nas coordenadas do local. A visualização começa diretamente no ponto turístico ou na posição pública mais próxima."
-                  : "Não há panorâmica pública disponível exatamente neste ponto. O mapa continua disponível para conferir a localização."}
+                : "O Locus procura uma panorâmica pública até 5 km do local e inicia diretamente no ponto encontrado. Se não houver cobertura nesta região, utilize a aba Mapa para conferir a posição."}
             </div>
             <div className="street-view-modal-actions">
               <button type="button" className="secondary-button" onClick={() => setStreetViewSelecionado(null)}>Fechar</button>
