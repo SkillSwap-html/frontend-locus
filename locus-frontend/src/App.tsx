@@ -38,8 +38,6 @@ import {
   autocomplete,
   buscaTextual,
   calcularRota,
-  detalhesLugar,
-  parecePlaceIdGoogle,
   perguntarGemini,
   respostaLocalAssistente,
   type StreetViewMeta,
@@ -54,7 +52,6 @@ import { criarViagem, definirLimitesOrcamento, listarNotificacoes, listarViagens
 import { MapPreview } from "@/components/MapPreview";
 import { GoogleEmbedMap } from "@/components/GoogleEmbedMap";
 import { GoogleStreetView } from "@/components/GoogleStreetView";
-import { buscarPanoramaMaisProximo } from "@/services/googleMaps";
 import { AdminView } from "@/components/AdminView";
 import { PlanningFlow } from "@/components/PlanningFlow";
 import { PreferencesView } from "@/components/PreferencesView";
@@ -1843,16 +1840,11 @@ function AssistantView({
     }
   }
   async function resolverLugarComCoordenadas(lugar: Lugar): Promise<Lugar | null> {
-    if (lugarTemDadosReais(lugar) && lugar.fonte === "Google Places") return lugar;
-    if (parecePlaceIdGoogle(lugar.placeId)) {
-      try {
-        const detalhe = await detalhesLugar(lugar.placeId.replace(/^places\//, ""));
-        if (lugarTemDadosReais(detalhe)) return detalhe;
-      } catch {
-        // Se o detalhe não estiver disponível, a busca textual ainda pode
-        // recuperar o local pelo nome e pelo endereço completo.
-      }
-    }
+    if (Boolean(lugar.placeId
+      && lugar.endereco?.trim()
+      && Number.isFinite(lugar.lat)
+      && Number.isFinite(lugar.lng)
+      && !(lugar.lat === 0 && lugar.lng === 0))) return lugar;
     const destinoAtual = viagem?.destino || preferencias?.destino || "";
     const consulta = [lugar.nome, lugar.endereco, destinoAtual].filter(Boolean).join(", ");
     if (!consulta) return null;
@@ -1866,42 +1858,9 @@ function AssistantView({
       return;
     }
     setModoVisualizacao(modo);
-    if (modo === "mapa") {
-      const meta: StreetViewMeta = { status: "READY" };
-      setStreetViews((atual) => ({ ...atual, [lugarResolvido.placeId]: meta }));
-      setStreetViewSelecionado({ lugar: lugarResolvido, meta });
-      return;
-    }
-    const metaExistente = streetViews[lugarResolvido.placeId];
-    if (metaExistente && metaExistente.status !== "PENDING" && metaExistente.status !== "READY") {
-      setStreetViewSelecionado({ lugar: lugarResolvido, meta: metaExistente });
-      return;
-    }
-    const meta: StreetViewMeta = { status: "PENDING" };
+    const meta: StreetViewMeta = { status: "READY" };
     setStreetViews((atual) => ({ ...atual, [lugarResolvido.placeId]: meta }));
     setStreetViewSelecionado({ lugar: lugarResolvido, meta });
-    try {
-      const panorama = await buscarPanoramaMaisProximo(lugarResolvido.lat, lugarResolvido.lng);
-      const metaAtualizada: StreetViewMeta = panorama
-        ? {
-            status: "OK",
-            panoramaLat: panorama.lat,
-            panoramaLng: panorama.lng,
-            raioBuscaMetros: panorama.raioBuscaMetros,
-          }
-        : { status: "ZERO_RESULTS" };
-      setStreetViews((atual) => ({ ...atual, [lugarResolvido.placeId]: metaAtualizada }));
-      setStreetViewSelecionado((atual) => atual?.lugar.placeId === lugarResolvido.placeId
-        ? { ...atual, meta: metaAtualizada }
-        : atual);
-    } catch {
-      // O iframe continua usando o ponto exato mesmo se a API JavaScript não
-      // estiver habilitada na chave; isso não impede o modal de abrir.
-      setStreetViews((atual) => ({
-        ...atual,
-        [lugarResolvido.placeId]: { status: "EXACT_POINT" },
-      }));
-    }
   }
   function revisarLugar(lugar: Lugar, _recomendacao?: Recomendacao) {
     void visualizarLugar(lugar, "streetview");
@@ -2007,15 +1966,6 @@ function AssistantView({
     recomendacao: Recomendacao,
     destino: string,
   ): Promise<Lugar | null> {
-    const placeIdGoogle = recomendacao.placeId;
-    if (placeIdGoogle && parecePlaceIdGoogle(placeIdGoogle)) {
-      try {
-        const detalhe = await detalhesLugar(placeIdGoogle.replace(/^places\//, ""));
-        if (lugarTemDadosReais(detalhe)) return detalhe;
-      } catch {
-        // O texto completo abaixo continua sendo usado como segunda tentativa.
-      }
-    }
     const consultas = [...new Set([
       [recomendacao.titulo, recomendacao.endereco, destino].filter(Boolean).join(", "),
       [recomendacao.titulo, destino].filter(Boolean).join(", "),
@@ -2483,12 +2433,6 @@ function AssistantView({
               <GoogleStreetView
                 lat={streetViewSelecionado.lugar.lat}
                 lng={streetViewSelecionado.lugar.lng}
-                {...(streetViewSelecionado.meta.panoramaLat != null
-                  ? { panoramaLat: streetViewSelecionado.meta.panoramaLat }
-                  : {})}
-                {...(streetViewSelecionado.meta.panoramaLng != null
-                  ? { panoramaLng: streetViewSelecionado.meta.panoramaLng }
-                  : {})}
                 imagemUrl={streetViewSelecionado.meta.imagemUrl}
                 className="street-view-frame location-modal-view"
               />

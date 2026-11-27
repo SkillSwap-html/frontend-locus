@@ -3,24 +3,18 @@ import { chaveGoogleMapsEmbed, urlGoogleMapsEmbed } from "@/services/googleMapsE
 export function GoogleStreetView({
   lat,
   lng,
-  panoramaLat,
-  panoramaLng,
   className = "street-view-frame",
   imagemUrl: _imagemUrl,
 }: {
   lat: number;
   lng: number;
-  panoramaLat?: number;
-  panoramaLng?: number;
   className?: string;
   imagemUrl?: string | undefined;
 }) {
   const chave = chaveGoogleMapsEmbed();
-  const latitude = Number.isFinite(panoramaLat) ? panoramaLat : lat;
-  const longitude = Number.isFinite(panoramaLng) ? panoramaLng : lng;
   const src = chave
     ? urlGoogleMapsEmbed("streetview", {
-        location: `${latitude},${longitude}`,
+        location: `${lat},${lng}`,
         heading: "0",
         pitch: "0",
         fov: "90",
