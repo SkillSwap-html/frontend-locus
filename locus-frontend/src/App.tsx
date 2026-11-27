@@ -38,6 +38,7 @@ import {
   autocomplete,
   buscaTextual,
   calcularRota,
+  parecePlaceIdGoogle,
   perguntarGemini,
   respostaLocalAssistente,
   type StreetViewMeta,
@@ -238,6 +239,17 @@ function estimativaLocal(lugar: Lugar): { categoria: CategoriaOrcamento; valor: 
   }
   return { categoria: "visitas", valor: 30, rotulo: "estimativa de visita" };
 }
+
+function separarDestinosInformados(valor: string): string[] {
+  const texto = valor.trim();
+  if (!texto) return [];
+  const partes = texto
+    .split(/\s*(?:;|\||\/|\r?\n)\s*/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 2);
+  return [...new Set((partes.length ? partes : [texto]).map((item) => item.trim()))];
+}
+
 function consultasParaLocais(pergunta: string, destino: string): string[] {
   if (!destino) return [];
   const normalizada = pergunta.toLowerCase();
@@ -247,10 +259,7 @@ function consultasParaLocais(pergunta: string, destino: string): string[] {
   const pedeRestaurante = /restaurante|restaurantes|comida|gastronomia|jantar|almoço|almoco|café|cafe/.test(normalizada);
   const pedeAtracao = /ponto|turíst|turist|museu|parque|atraç|visitar|roteiro|lugar|lugares|passeio/.test(normalizada);
   if (pedePassagem && !pedeHospedagem && !pedeAtracao && !pedePraia && !pedeRestaurante) return [];
-  const destinos = destino
-    .split(/\s*[;|]\s*/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const destinos = separarDestinosInformados(destino);
   const consultas: string[] = [];
   for (const local of destinos) {
     if (pedeHospedagem) consultas.push(`hotéis, pousadas e hospedagens reais em ${local}`);
@@ -267,7 +276,8 @@ function consultasParaLocais(pergunta: string, destino: string): string[] {
       if (!pedeRestaurante) consultas.push(`restaurantes e gastronomia local em ${local}`);
     }
   }
-  return [...new Set(consultas)].slice(0, 8);
+  const limite = Math.max(8, destinos.length * 3);
+  return [...new Set(consultas)].slice(0, limite);
 }
 function formatarTransporte(value: string): string {
   return (
@@ -1551,42 +1561,64 @@ function AssistantView({
             }
           : {}),
       };
-      // Mostra a resposta textual imediatamente. Places e rotas enriquecem a
-      // mensagem, mas não podem bloquear a conversa enquanto são consultados.
-      setMensagens((atuais) => atuais.map((item) => item.id === idResposta ? { ...respostaComOrcamento, id: idResposta } : item));
       const destinoBusca = destinoAtual;
+      const destinosBusca = separarDestinosInformados(destinoBusca);
       const consultasDaIa = (resposta.consultas ?? [])
         .map((consulta) => consulta.trim())
         .filter((consulta) => consulta.length > 4)
         .filter((consulta) => !/consultas?\s+(curtas|abaixo)|obter mais detalhes|google places$/i.test(consulta));
-      const consultasDeCategorias = consultasParaLocais(pergunta, destinoBusca);
-      const consultaPadrao = destinoBusca
-        ? `${pergunta} em ${destinoBusca}`
-        : pergunta;
-      // A consulta digitada pelo viajante vem primeiro. Isso garante que um
-      // lugar nomeado, como "Torre Eiffel", não seja perdido atrás de uma
-      // lista genérica de pontos turísticos de Paris.
-      const consultas = [...new Set([consultaPadrao, ...consultasDeCategorias, ...consultasDaIa])].slice(0, 8);
+      const consultasDeCategorias = destinosBusca.flatMap((destino) => consultasParaLocais(pergunta, destino));
+      const consultasDaIaPorDestino = destinosBusca.length
+        ? consultasDaIa.flatMap((consulta) => {
+            const consultaNormalizada = normalizarTextoLocal(consulta);
+            const jaIndicaDestino = destinosBusca.some((destino) =>
+              consultaNormalizada.includes(normalizarTextoLocal(destino)),
+            );
+            return jaIndicaDestino
+              ? [consulta]
+              : destinosBusca.map((destino) => `${consulta} em ${destino}`);
+          })
+        : consultasDaIa;
+      const consultasPadrao = destinosBusca.length
+        ? destinosBusca.map((destino) => `${pergunta} em ${destino}`)
+        : [pergunta];
+      const consultas = [...new Set([
+        ...consultasPadrao,
+        ...consultasDeCategorias,
+        ...consultasDaIaPorDestino,
+      ])];
       const contextoProximidade = hospedagemBase
         ? ` próximo à hospedagem ${hospedagemBase.nome}`
         : "";
       const consultasBusca = consultas.map((consulta) => {
         const consultaComBase = `${consulta}${contextoProximidade}`;
-        return destinoBusca && !consultaComBase.toLowerCase().includes(destinoBusca.toLowerCase())
+        const consultaTemDestino = destinosBusca.some((destino) =>
+          normalizarTextoLocal(consultaComBase).includes(normalizarTextoLocal(destino)),
+        );
+        return destinoBusca && !consultaTemDestino
           ? `${consultaComBase} em ${destinoBusca}`
           : consultaComBase;
       });
+      const limiteConsultasPlaces = destinosBusca.length
+        ? Math.max(4, destinosBusca.length * 3)
+        : 4;
       let falhasBusca = 0;
       const resultados = await Promise.all(
-        consultasBusca.slice(0, 6).map((consulta) =>
+        consultasBusca.slice(0, limiteConsultasPlaces).map((consulta) =>
           buscaTextual(consulta).catch(() => {
             falhasBusca += 1;
             return { lugares: [], fallback: false };
           }),
         ),
       );
-      const encontrados = resultados.flatMap((item) => item.lugares);
-      const placesEmFallback = resultados.some((item) => item.fallback);
+      const encontrados = resultados
+        .flatMap((item) => item.lugares)
+        .filter(lugarTemDadosReais);
+      const placesEmFallback = resultados.length > 0 && resultados.every((item) => item.fallback);
+      const recomendacoesDaIaComDetalhes = await Promise.all(
+        (respostaComOrcamento.recomendacoes ?? [])
+          .map((recomendacao) => enriquecerRecomendacaoComPlaces(recomendacao, destinoBusca)),
+      );
       let respostaFinal = respostaComOrcamento;
       if (encontrados.length) {
         const unicos = [...new globalThis.Map(encontrados.map((item) => [item.placeId, item])).values()];
@@ -1632,16 +1664,13 @@ function AssistantView({
           const estimativas = estimativasDoLocal(lugar, destinoBusca);
           const valorDaCategoria = estimativas.custos[estimativa.categoria]?.valorBrl ?? estimativa.valor;
           const custoPrincipal = estimativas.custos[estimativa.categoria];
-          const origemConsulta = placesEmFallback
-            ? "Opção de exemplo para manter o planejamento enquanto a cota do Google Places é recomposta."
-            : "Encontrado no Google Places; confira o Street View antes de adicionar.";
           return {
           id: `lugar-${lugar.placeId}`,
           placeId: lugar.placeId,
           tipo: "lugar",
           titulo: lugar.nome,
           resumo: `${lugar.categoria} · ${lugar.endereco || "localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""}${valorDaCategoria > 0 && custoPrincipal ? ` · ${formatarMoeda(custoPrincipal.valor, custoPrincipal.moeda)} ≈ ${brl(valorDaCategoria)} (${estimativa.rotulo})` : ` · ${estimativa.rotulo}`}`,
-          justificativa: `${hospedagemBase ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}. ` : ""}${origemConsulta} Confira o Street View antes de adicionar. O valor é uma estimativa e será somado somente se você adicionar o local.`,
+          justificativa: `${hospedagemBase ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}. ` : ""}Local confirmado pelo Google Places, com coordenadas para abrir o mapa e o Street View no ponto correto. O valor é uma estimativa e será somado somente se você adicionar o local.`,
           evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
           categoria: estimativa.categoria,
           custos: estimativas.custos,
@@ -1656,8 +1685,9 @@ function AssistantView({
           dia: Math.min(diasDeViagem, Math.floor(index / 3) + 1),
           };
         });
-        const recomendacoesDaIa = respostaComOrcamento.recomendacoes ?? [];
-        const recomendacoesDaIaComCustos = recomendacoesDaIa.map((recomendacao) => {
+        const recomendacoesDaIaComCustos = recomendacoesDaIaComDetalhes
+          .filter((recomendacao): recomendacao is Recomendacao => Boolean(recomendacao))
+          .map((recomendacao) => {
           const lugar = lugarDaRecomendacao(recomendacao);
           if (!lugar) return recomendacao;
           const estimativas = estimativasDoLocal(lugar, destinoBusca);
@@ -1680,14 +1710,16 @@ function AssistantView({
         respostaFinal = {
           ...respostaComOrcamento,
           texto: organizados.length
-            ? `${resposta.texto} ${placesEmFallback ? `Encontrei ${organizados.length} opções de exemplo para ${destinoBusca || "o destino informado"} enquanto a consulta do Google Places é recomposta.` : `Encontrei ${organizados.length} locais reais${hospedagemBase ? ` em até 20 km da hospedagem ${hospedagemBase.nome}` : ""}.`} Veja a avaliação, abra o Street View e adicione somente os que desejar.`
+            ? `${resposta.texto} Encontrei ${organizados.length} locais reais${hospedagemBase ? ` em até 20 km da hospedagem ${hospedagemBase.nome}` : ""}. Cada resultado inclui avaliação quando disponível, endereço e coordenadas para abrir o mapa e o Street View no ponto correto.`
             : `Não encontrei pontos turísticos dentro de 20 km da hospedagem ${hospedagemBase?.nome ?? "selecionada"}. Vou evitar sugerir locais distantes; pesquise um bairro ou local específico no campo ao lado.`,
           ...(recomendacoesComDetalhes.length ? { recomendacoes: recomendacoesComDetalhes } : {}),
         };
       } else {
         setLugares([]);
         setRota([]);
-        const recomendacoesDaIaComCustos = respostaComOrcamento.recomendacoes?.map((recomendacao) => {
+        const recomendacoesDaIaComCustos = recomendacoesDaIaComDetalhes
+          .filter((recomendacao): recomendacao is Recomendacao => Boolean(recomendacao))
+          .map((recomendacao) => {
           const lugar = lugarDaRecomendacao(recomendacao);
           if (!lugar) return recomendacao;
           return {
@@ -1700,9 +1732,9 @@ function AssistantView({
           ...respostaComOrcamento,
           ...(recomendacoesDaIaComCustos?.length ? { recomendacoes: recomendacoesDaIaComCustos } : {}),
           texto: falhasBusca || placesEmFallback
-            ? `${respostaComOrcamento.texto} ${possuiRecomendacoesDaIa ? "A IA encontrou recomendações com nome e endereço para você conferir no Google." : "A consulta automática de lugares está temporariamente indisponível; tente novamente em alguns segundos."}`
+            ? `${respostaComOrcamento.texto} ${possuiRecomendacoesDaIa ? "A IA encontrou recomendações confirmadas com nome, endereço e coordenadas reais." : "A consulta automática de lugares está temporariamente indisponível; tente novamente em alguns segundos."}`
             : possuiRecomendacoesDaIa
-              ? `${respostaComOrcamento.texto} Confira no Google cada nome e endereço recomendado antes de adicionar ao roteiro.`
+              ? `${respostaComOrcamento.texto} Os locais exibidos foram confirmados com nome, endereço e coordenadas reais.`
               : `${respostaComOrcamento.texto} Não encontrei resultados para essa busca no destino informado. Tente citar uma praia, museu, bairro ou ponto turístico específico.`,
         };
       }
@@ -1733,12 +1765,16 @@ function AssistantView({
         fallback.orcamentoCambio = TAXAS_CAMBIO_REFERENCIA[moeda];
       }
       try {
-        const consultasFallback = consultasParaLocais(pergunta, destinoBusca);
+        const destinosFallback = separarDestinosInformados(destinoBusca);
+        const consultasFallback = destinosFallback.flatMap((destino) => consultasParaLocais(pergunta, destino));
+        const consultasPadraoFallback = destinosFallback.length
+          ? destinosFallback.map((destino) => `${pergunta} em ${destino}`)
+          : [pergunta];
         const resultado = await Promise.all(
-          [...new Set([destinoBusca ? `${pergunta} em ${destinoBusca}` : pergunta, ...consultasFallback])]
-            .slice(0, 6)
+          [...new Set([...consultasPadraoFallback, ...consultasFallback])]
+            .slice(0, Math.max(6, destinosFallback.length * 3))
             .map((consulta) => buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }))),
-        ).then((resultados) => ({ lugares: resultados.flatMap((item) => item.lugares) }));
+        ).then((resultados) => ({ lugares: resultados.flatMap((item) => item.lugares).filter(lugarTemDadosReais) }));
         const pedidoHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/i.test(pergunta);
         const locaisRelevantes = pedidoHospedagem
           ? resultado.lugares
@@ -1759,7 +1795,7 @@ function AssistantView({
           placeId: lugar.placeId,
           tipo: "lugar",
           titulo: lugar.nome,
-          resumo: `${lugar.categoria} · ${lugar.endereco || "Localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""} · custos estimados em ${estimativas.custos.visitas?.moeda ?? "USD"}`,
+          resumo: `${lugar.categoria} · ${lugar.endereco}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""} · custos estimados em ${estimativas.custos.visitas?.moeda ?? "USD"}`,
           justificativa: hospedagemBase
             ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem. Confira no Street View antes de escolher. O valor é uma estimativa.`
             : "Resultado real consultado no Google Places. Confira no Street View antes de escolher. O valor é uma estimativa.",
@@ -1821,11 +1857,18 @@ function AssistantView({
     }
   }
   async function resolverLugarComCoordenadas(lugar: Lugar): Promise<Lugar | null> {
-    if (Number.isFinite(lugar.lat) && Number.isFinite(lugar.lng) && !(lugar.lat === 0 && lugar.lng === 0)) return lugar;
-    const consulta = [lugar.nome, lugar.endereco].filter(Boolean).join(", ");
+    const possuiDadosReais = lugar.fonte === "Google Places"
+      && parecePlaceIdGoogle(lugar.placeId)
+      && Boolean(lugar.endereco?.trim())
+      && Number.isFinite(lugar.lat)
+      && Number.isFinite(lugar.lng)
+      && !(lugar.lat === 0 && lugar.lng === 0);
+    if (possuiDadosReais) return lugar;
+    const destinoAtual = viagem?.destino || preferencias?.destino || "";
+    const consulta = [lugar.nome, lugar.endereco, destinoAtual].filter(Boolean).join(", ");
     if (!consulta) return null;
     const resultado = await buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }));
-    return resultado.lugares.find((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng) && !(item.lat === 0 && item.lng === 0)) ?? null;
+    return resultado.lugares.find(lugarTemDadosReais) ?? null;
   }
   async function visualizarLugar(lugar: Lugar, modo: "mapa" | "streetview") {
     const lugarResolvido = await resolverLugarComCoordenadas(lugar);
@@ -1891,11 +1934,15 @@ function AssistantView({
       ? lugares.find((item) => item.placeId === recomendacao.placeId)
       : undefined;
     if (encontrado) return encontrado;
-    if (recomendacao.placeId && Number.isFinite(recomendacao.lat) && Number.isFinite(recomendacao.lng)) {
+    if (parecePlaceIdGoogle(recomendacao.placeId)
+      && Boolean(recomendacao.endereco?.trim())
+      && Number.isFinite(recomendacao.lat)
+      && Number.isFinite(recomendacao.lng)
+      && !(recomendacao.lat === 0 && recomendacao.lng === 0)) {
       return {
-        placeId: recomendacao.placeId,
+        placeId: recomendacao.placeId!,
         nome: recomendacao.titulo,
-        endereco: recomendacao.endereco ?? "Localização consultada no Google Places",
+        endereco: recomendacao.endereco!,
         categoria: recomendacao.categoriaLocal ?? "Ponto de interesse",
         ...(recomendacao.avaliacao != null ? { avaliacao: recomendacao.avaliacao } : {}),
         lat: recomendacao.lat!,
@@ -1905,27 +1952,87 @@ function AssistantView({
         demonstrativo: false,
       };
     }
-    if (recomendacao.tipo === "lugar" || recomendacao.tipo === "atividade" || recomendacao.tipo === "hospedagem") {
-      // A IA pode retornar uma recomendação textual antes de o Places
-      // entregar coordenadas. Ainda assim o usuário deve conseguir abrir a
-      // busca oficial do local no Maps e continuar a conferência no Google.
-      return {
-        placeId: recomendacao.placeId || recomendacao.id,
-        nome: recomendacao.titulo,
-        // Quando a IA ainda não recebeu o endereço estruturado do Places,
-        // a consulta completa normalmente contém cidade e país. Preserve-a
-        // para que o botão do Maps não pesquise apenas o título do local.
-        endereco: recomendacao.endereco || recomendacao.consulta || "",
-        categoria: recomendacao.categoriaLocal ?? "Ponto de interesse",
-        ...(recomendacao.avaliacao != null ? { avaliacao: recomendacao.avaliacao } : {}),
-        lat: 0,
-        lng: 0,
-        fonte: recomendacao.evidencia.fonte,
-        consultadoEm: recomendacao.evidencia.consultadoEm,
-        demonstrativo: false,
-      };
+    return null;
+  }
+  function lugarTemDadosReais(lugar: Lugar | null | undefined): lugar is Lugar {
+    return Boolean(lugar
+      && parecePlaceIdGoogle(lugar.placeId)
+      && lugar.endereco?.trim()
+      && Number.isFinite(lugar.lat)
+      && Number.isFinite(lugar.lng)
+      && !(lugar.lat === 0 && lugar.lng === 0)
+      && lugar.fonte === "Google Places");
+  }
+  function normalizarTextoLocal(valor: string): string {
+    return valor
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleLowerCase();
+  }
+  function pontuarCandidatoLocal(lugar: Lugar, recomendacao: Recomendacao, destino: string): number {
+    const consulta = normalizarTextoLocal(`${recomendacao.titulo} ${recomendacao.endereco ?? ""}`);
+    const textoCandidato = normalizarTextoLocal(`${lugar.nome} ${lugar.endereco}`);
+    const tokens = consulta.split(/[^a-z0-9]+/).filter((token) => token.length >= 3);
+    const coincidencias = tokens.reduce((total, token) => total + (textoCandidato.includes(token) ? 1 : 0), 0);
+    const nomeRecomendado = normalizarTextoLocal(recomendacao.titulo);
+    const nomeEncontrado = normalizarTextoLocal(lugar.nome);
+    const nomeExato = nomeEncontrado.includes(nomeRecomendado) || nomeRecomendado.includes(nomeEncontrado);
+    const destinoEncontrado = destino
+      ? textoCandidato.includes(normalizarTextoLocal(destino))
+      : false;
+    return coincidencias + (nomeExato ? 8 : 0) + (destinoEncontrado ? 2 : 0);
+  }
+  async function resolverRecomendacaoComPlaces(
+    recomendacao: Recomendacao,
+    destino: string,
+  ): Promise<Lugar | null> {
+    const consultas = [...new Set([
+      [recomendacao.titulo, recomendacao.endereco, destino].filter(Boolean).join(", "),
+      [recomendacao.titulo, destino].filter(Boolean).join(", "),
+      [recomendacao.consulta, destino].filter(Boolean).join(", "),
+    ].filter((consulta) => consulta.trim().length > 4))];
+    for (const consulta of consultas) {
+      const resultado = await buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }));
+      const candidatos = resultado.lugares.filter(lugarTemDadosReais);
+      if (candidatos.length) {
+        return [...candidatos].sort((a, b) =>
+          pontuarCandidatoLocal(b, recomendacao, destino) - pontuarCandidatoLocal(a, recomendacao, destino),
+        )[0] ?? null;
+      }
     }
     return null;
+  }
+  async function enriquecerRecomendacaoComPlaces(
+    recomendacao: Recomendacao,
+    destino: string,
+  ): Promise<Recomendacao | null> {
+    const ehLocal = recomendacao.tipo === "lugar"
+      || recomendacao.tipo === "atividade"
+      || recomendacao.tipo === "hospedagem";
+    if (!ehLocal) return recomendacao;
+    const lugar = await resolverRecomendacaoComPlaces(recomendacao, destino);
+    if (!lugar) return null;
+    const estimativa = estimativaLocal(lugar);
+    const estimativas = estimativasDoLocal(lugar, destino);
+    const valorDaCategoria = estimativas.custos[estimativa.categoria]?.valorBrl ?? estimativa.valor;
+    const custoPrincipal = estimativas.custos[estimativa.categoria];
+    return {
+      ...recomendacao,
+      titulo: lugar.nome,
+      resumo: `${lugar.categoria} · ${lugar.endereco}${lugar.avaliacao != null ? ` · ${estrelasAvaliacao(lugar.avaliacao)}` : ""}${valorDaCategoria > 0 && custoPrincipal ? ` · ${formatarMoeda(custoPrincipal.valor, custoPrincipal.moeda)} ≈ ${brl(valorDaCategoria)}` : ""}`,
+      justificativa: "Local confirmado pelo Google Places, com endereço e coordenadas para abrir o mapa e o Street View no ponto correto.",
+      consulta: `${lugar.nome}, ${lugar.endereco}`,
+      evidencia: { fonte: "Google Places", consultadoEm: lugar.consultadoEm },
+      placeId: lugar.placeId,
+      endereco: lugar.endereco,
+      lat: lugar.lat,
+      lng: lugar.lng,
+      categoriaLocal: lugar.categoria,
+      ...(lugar.avaliacao != null ? { avaliacao: lugar.avaliacao } : {}),
+      custos: recomendacao.custos ?? estimativas.custos,
+      categoria: recomendacao.categoria ?? estimativa.categoria,
+      ...(valorDaCategoria > 0 && recomendacao.valor == null ? { valor: valorDaCategoria } : {}),
+    };
   }
   function adicionarLugar(lugar: Lugar) {
     if (!streetViews[lugar.placeId]) {
@@ -2329,7 +2436,7 @@ function AssistantView({
             </button>
             <span className="section-label">Visualização dentro do Locus</span>
             <h2 id="street-view-modal-title">{streetViewSelecionado.lugar.nome}</h2>
-            <p>{streetViewSelecionado.lugar.endereco || "Localização consultada no Google Places"}</p>
+            <p>{streetViewSelecionado.lugar.endereco}</p>
             <div className="location-modal-tabs" role="tablist" aria-label="Visualização do local">
               <button type="button" className={modoVisualizacao === "mapa" ? "active" : ""} onClick={() => setModoVisualizacao("mapa")}><Map size={15} /> Mapa</button>
               <button type="button" className={modoVisualizacao === "streetview" ? "active" : ""} onClick={() => setModoVisualizacao("streetview")}><Eye size={15} /> Street View</button>
@@ -2338,6 +2445,7 @@ function AssistantView({
               <GoogleEmbedMap
                 nome={streetViewSelecionado.lugar.nome}
                 endereco={streetViewSelecionado.lugar.endereco}
+                placeId={streetViewSelecionado.lugar.placeId}
                 lat={streetViewSelecionado.lugar.lat}
                 lng={streetViewSelecionado.lugar.lng}
               />
