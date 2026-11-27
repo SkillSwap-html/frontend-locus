@@ -3,22 +3,30 @@ import { chaveGoogleMapsEmbed, urlGoogleMapsEmbed } from "@/services/googleMapsE
 export function GoogleStreetView({
   lat,
   lng,
+  endereco,
   className = "street-view-frame",
   imagemUrl: _imagemUrl,
 }: {
-  lat: number;
-  lng: number;
+  lat?: number;
+  lng?: number;
+  endereco?: string;
   className?: string;
   imagemUrl?: string | undefined;
 }) {
   const chave = chaveGoogleMapsEmbed();
+  const coordenadas = Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0
+    ? `${lat},${lng}`
+    : "";
+  const location = coordenadas || endereco?.trim() || "";
   const src = chave
-    ? urlGoogleMapsEmbed("streetview", {
-        location: `${lat},${lng}`,
+    ? location
+      ? urlGoogleMapsEmbed("streetview", {
+        location,
         heading: "0",
         pitch: "0",
         fov: "90",
       })
+      : ""
     : "";
 
   return (
