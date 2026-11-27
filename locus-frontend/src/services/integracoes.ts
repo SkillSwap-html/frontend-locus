@@ -378,16 +378,12 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
   return raw.map((item: Json, index) => {
     const value = objeto(item);
     const evidencia = objeto(value.evidencia);
-    const location = objeto(value.location);
     const categoria = texto(value.categoria) as NonNullable<MensagemAssistente["recomendacoes"]>[number]["categoria"];
     const natureza = texto(value.natureza) as NonNullable<MensagemAssistente["recomendacoes"]>[number]["natureza"];
-    const placeId = texto(value.placeId) || texto(value.idGoogle) || texto(value.googlePlaceId);
-    const latitude = Number(value.lat ?? value.latitude ?? location.latitude);
-    const longitude = Number(value.lng ?? value.longitude ?? location.longitude);
     return {
       id: texto(value.id) || `recomendacao-${Date.now()}-${index}`,
       tipo: (texto(value.tipo) || "lugar") as NonNullable<MensagemAssistente["recomendacoes"]>[number]["tipo"],
-      titulo: texto(value.titulo) || texto(value.nome) || texto(value.name) || "Sugestão de viagem",
+      titulo: texto(value.titulo) || "Sugestão de viagem",
       resumo: texto(value.resumo) || "Confira esta possibilidade antes de adicionar ao roteiro.",
       justificativa: texto(value.justificativa) || "Combina com o contexto informado.",
       evidencia: {
@@ -395,11 +391,8 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
         consultadoEm: texto(evidencia.consultadoEm) || new Date().toISOString(),
       },
       ...(texto(value.consulta) ? { consulta: texto(value.consulta) } : {}),
-      ...(placeId ? { placeId } : {}),
       ...(Number.isFinite(Number(value.avaliacao ?? value.rating ?? value.nota)) ? { avaliacao: Number(value.avaliacao ?? value.rating ?? value.nota) } : {}),
-      ...(texto(value.endereco) || texto(value.formattedAddress) ? { endereco: texto(value.endereco) || texto(value.formattedAddress) } : {}),
-      ...(Number.isFinite(latitude) && latitude !== 0 ? { lat: latitude } : {}),
-      ...(Number.isFinite(longitude) && longitude !== 0 ? { lng: longitude } : {}),
+      ...(texto(value.endereco) ? { endereco: texto(value.endereco) } : {}),
       ...(texto(value.categoriaLocal) ? { categoriaLocal: texto(value.categoriaLocal) } : {}),
       ...(Number.isInteger(Number(value.dia)) ? { dia: Number(value.dia) } : {}),
       ...(texto(value.horario) ? { horario: texto(value.horario) } : {}),
@@ -589,12 +582,9 @@ export interface ResultadoBusca {
 // O cache curto também permite que o chat continue funcionando com fallback
 // local enquanto a cota do Google é recomposta.
 const CACHE_PLACES_MS = 45_000;
-const INTERVALO_MINIMO_PLACES_MS = 350;
 const cacheBusca = new Map<string, { expiraEm: number; resultado: ResultadoBusca }>();
 const cacheAutocomplete = new Map<string, { expiraEm: number; resultado: { id: string; texto: string }[] }>();
 let placesIndisponivelAte = 0;
-let filaConsultasPlaces: Promise<unknown> = Promise.resolve();
-let ultimaConsultaPlacesEm = 0;
 
 function chaveBusca(valor: string): string {
   return valor.trim().toLocaleLowerCase();
@@ -604,48 +594,29 @@ function placesFoiLimitado(error: unknown): boolean {
   return error instanceof LocusError && error.tipo === "quota";
 }
 
-export function parecePlaceIdGoogle(placeId: string | undefined): boolean {
-  const valor = (placeId ?? "").replace(/^places\//, "").trim();
-  return valor.length >= 20 && /^[A-Za-z0-9_-]+$/.test(valor);
-}
-
-async function executarConsultaPlaces<T>(consulta: () => Promise<T>): Promise<T> {
-  const tarefa = filaConsultasPlaces.then(async () => {
-    const espera = Math.max(0, INTERVALO_MINIMO_PLACES_MS - (Date.now() - ultimaConsultaPlacesEm));
-    if (espera > 0) await new Promise((resolve) => setTimeout(resolve, espera));
-    ultimaConsultaPlacesEm = Date.now();
-    return consulta();
-  });
-  filaConsultasPlaces = tarefa.then(() => undefined, () => undefined);
-  return tarefa;
-}
-
 export async function buscaTextual(q: string): Promise<ResultadoBusca> {
   const chave = chaveBusca(q);
   const cacheado = cacheBusca.get(chave);
   if (cacheado && cacheado.expiraEm > Date.now()) return cacheado.resultado;
   if (placesIndisponivelAte > Date.now()) {
-    const resultado = { lugares: [], fallback: true };
+    const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
     cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   }
   try {
-    const raw = await executarConsultaPlaces<Json>(() => {
-      if (placesIndisponivelAte > Date.now()) return Promise.resolve({ places: [] });
-      return chamar<Json>(() =>
-        api.post(`${BASE}/google/places/busca-textual`, { textQuery: q, languageCode: "pt-BR" }),
-      );
-    });
+    const raw = await chamar<Json>(() =>
+      api.post(`${BASE}/google/places/busca-textual`, { textQuery: q, languageCode: "pt-BR" }),
+    );
     const places = Array.isArray(raw.places) ? raw.places : [];
     const resultado = places.length
       ? { lugares: places.map(normalizarLugar), fallback: false }
-      : { lugares: [], fallback: true };
+      : { lugares: lugaresDemonstrativos(q), fallback: true };
     cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   } catch (error) {
     if (placesFoiLimitado(error) || error instanceof LocusError) {
       placesIndisponivelAte = Date.now() + CACHE_PLACES_MS;
-      const resultado = { lugares: [], fallback: true };
+      const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
       cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
       return resultado;
     }
@@ -693,9 +664,9 @@ export async function autocomplete(q: string): Promise<{ id: string; texto: stri
 }
 
 export async function detalhesLugar(placeId: string): Promise<Lugar> {
-  return normalizarLugar(await executarConsultaPlaces(() =>
-    chamar<Json>(() => api.get(`${BASE}/google/places/${encodeURIComponent(placeId)}`)),
-  ));
+  return normalizarLugar(
+    await chamar<Json>(() => api.get(`${BASE}/google/places/${encodeURIComponent(placeId)}`)),
+  );
 }
 
 // ---------- Google Routes ----------
@@ -745,9 +716,6 @@ export interface StreetViewMeta {
   imagemUrl?: string;
   embedUrl?: string;
   data?: string;
-  panoramaLat?: number;
-  panoramaLng?: number;
-  raioBuscaMetros?: number;
 }
 
 export async function streetViewMetadata(lat: number, lng: number, radius = 150): Promise<StreetViewMeta> {

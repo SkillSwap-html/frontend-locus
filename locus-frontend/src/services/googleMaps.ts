@@ -12,38 +12,17 @@ type GoogleMapsNamespace = {
     StreetViewService: new () => {
       getPanorama(
         request: Record<string, unknown>,
-        callback: (
-          data: {
-            location?: {
-              latLng?: {
-                lat: number | (() => number);
-                lng: number | (() => number);
-              };
-            };
-          } | null,
-          status: string,
-        ) => void,
+        callback: (data: { location?: { latLng?: { lat: number; lng: number } } } | null, status: string) => void,
       ): void;
     };
     StreetViewStatus?: { OK?: string };
   };
 };
 
-export type PanoramaEncontrado = {
-  lat: number;
-  lng: number;
-  raioBuscaMetros: number;
-};
-
 let carregamento: Promise<GoogleMapsNamespace> | null = null;
 
 export function carregarGoogleMaps(): Promise<GoogleMapsNamespace> {
-  const chave = String(
-    import.meta.env["VITE_GOOGLE_MAPS_API_KEY"]
-      || import.meta.env["VITE_GOOGLE_MAPS_EMBED_API_KEY"]
-      || import.meta.env["VITE_GOOGLE_MAPS_EMBED_API"]
-      || "",
-  )
+  const chave = String(import.meta.env["VITE_GOOGLE_MAPS_API_KEY"] ?? "")
     .trim()
     .replace(/^['"]|['"]$/g, "")
     .replace(/\\([:/])/g, "$1");
@@ -87,45 +66,4 @@ export function carregarGoogleMaps(): Promise<GoogleMapsNamespace> {
   });
 
   return carregamento;
-}
-
-export async function buscarPanoramaMaisProximo(
-  lat: number,
-  lng: number,
-): Promise<PanoramaEncontrado | null> {
-  const google = await carregarGoogleMaps();
-  const servico = new google.maps.StreetViewService();
-  const raios = [50, 5000, 10000, 15000];
-
-  for (const raioBuscaMetros of raios) {
-    const panorama = await new Promise<{ lat: number; lng: number } | null>((resolve) => {
-      servico.getPanorama(
-        {
-          location: { lat, lng },
-          radius: raioBuscaMetros,
-        },
-        (data, status) => {
-          const statusOk = google.maps.StreetViewStatus?.OK ?? "OK";
-          const ponto = data?.location?.latLng;
-          if (status !== statusOk || !ponto) {
-            resolve(null);
-            return;
-          }
-          const latitude = typeof ponto.lat === "function" ? ponto.lat() : ponto.lat;
-          const longitude = typeof ponto.lng === "function" ? ponto.lng() : ponto.lng;
-          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-            resolve(null);
-            return;
-          }
-          resolve({ lat: latitude, lng: longitude });
-        },
-      );
-    });
-
-    if (panorama) {
-      return { ...panorama, raioBuscaMetros };
-    }
-  }
-
-  return null;
 }

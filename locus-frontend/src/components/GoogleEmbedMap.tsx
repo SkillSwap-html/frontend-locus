@@ -3,23 +3,18 @@ import { chaveGoogleMapsEmbed, urlGoogleMapsEmbed } from "@/services/googleMapsE
 export function GoogleEmbedMap({
   nome,
   endereco,
-  placeId,
   lat,
   lng,
 }: {
   nome: string;
   endereco?: string;
-  placeId?: string;
   lat: number;
   lng: number;
 }) {
   const chave = chaveGoogleMapsEmbed();
   const consulta = [nome, endereco, `${lat},${lng}`].filter(Boolean).join(", ");
-  const placeIdLimpo = placeId?.replace(/^places\//, "");
   const src = chave
-    ? urlGoogleMapsEmbed("place", {
-        q: placeIdLimpo ? `place_id:${placeIdLimpo}` : consulta,
-      })
+    ? urlGoogleMapsEmbed("place", { q: consulta })
     : "";
 
   return (
