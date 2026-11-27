@@ -589,9 +589,12 @@ export interface ResultadoBusca {
 // O cache curto também permite que o chat continue funcionando com fallback
 // local enquanto a cota do Google é recomposta.
 const CACHE_PLACES_MS = 45_000;
+const INTERVALO_MINIMO_PLACES_MS = 350;
 const cacheBusca = new Map<string, { expiraEm: number; resultado: ResultadoBusca }>();
 const cacheAutocomplete = new Map<string, { expiraEm: number; resultado: { id: string; texto: string }[] }>();
 let placesIndisponivelAte = 0;
+let filaConsultasPlaces: Promise<unknown> = Promise.resolve();
+let ultimaConsultaPlacesEm = 0;
 
 function chaveBusca(valor: string): string {
   return valor.trim().toLocaleLowerCase();
@@ -599,6 +602,22 @@ function chaveBusca(valor: string): string {
 
 function placesFoiLimitado(error: unknown): boolean {
   return error instanceof LocusError && error.tipo === "quota";
+}
+
+export function parecePlaceIdGoogle(placeId: string | undefined): boolean {
+  const valor = (placeId ?? "").replace(/^places\//, "").trim();
+  return valor.length >= 20 && /^[A-Za-z0-9_-]+$/.test(valor);
+}
+
+async function executarConsultaPlaces<T>(consulta: () => Promise<T>): Promise<T> {
+  const tarefa = filaConsultasPlaces.then(async () => {
+    const espera = Math.max(0, INTERVALO_MINIMO_PLACES_MS - (Date.now() - ultimaConsultaPlacesEm));
+    if (espera > 0) await new Promise((resolve) => setTimeout(resolve, espera));
+    ultimaConsultaPlacesEm = Date.now();
+    return consulta();
+  });
+  filaConsultasPlaces = tarefa.then(() => undefined, () => undefined);
+  return tarefa;
 }
 
 export async function buscaTextual(q: string): Promise<ResultadoBusca> {
@@ -611,9 +630,12 @@ export async function buscaTextual(q: string): Promise<ResultadoBusca> {
     return resultado;
   }
   try {
-    const raw = await chamar<Json>(() =>
-      api.post(`${BASE}/google/places/busca-textual`, { textQuery: q, languageCode: "pt-BR" }),
-    );
+    const raw = await executarConsultaPlaces<Json>(() => {
+      if (placesIndisponivelAte > Date.now()) return Promise.resolve({ places: [] });
+      return chamar<Json>(() =>
+        api.post(`${BASE}/google/places/busca-textual`, { textQuery: q, languageCode: "pt-BR" }),
+      );
+    });
     const places = Array.isArray(raw.places) ? raw.places : [];
     const resultado = places.length
       ? { lugares: places.map(normalizarLugar), fallback: false }
@@ -671,9 +693,9 @@ export async function autocomplete(q: string): Promise<{ id: string; texto: stri
 }
 
 export async function detalhesLugar(placeId: string): Promise<Lugar> {
-  return normalizarLugar(
-    await chamar<Json>(() => api.get(`${BASE}/google/places/${encodeURIComponent(placeId)}`)),
-  );
+  return normalizarLugar(await executarConsultaPlaces(() =>
+    chamar<Json>(() => api.get(`${BASE}/google/places/${encodeURIComponent(placeId)}`)),
+  ));
 }
 
 // ---------- Google Routes ----------

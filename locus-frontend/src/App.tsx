@@ -39,6 +39,7 @@ import {
   buscaTextual,
   calcularRota,
   detalhesLugar,
+  parecePlaceIdGoogle,
   perguntarGemini,
   respostaLocalAssistente,
   type StreetViewMeta,
@@ -1577,7 +1578,7 @@ function AssistantView({
       });
       let falhasBusca = 0;
       const resultados = await Promise.all(
-        consultasBusca.slice(0, 6).map((consulta) =>
+        consultasBusca.slice(0, 4).map((consulta) =>
           buscaTextual(consulta).catch(() => {
             falhasBusca += 1;
             return { lugares: [], fallback: false };
@@ -1843,7 +1844,7 @@ function AssistantView({
   }
   async function resolverLugarComCoordenadas(lugar: Lugar): Promise<Lugar | null> {
     if (lugarTemDadosReais(lugar) && lugar.fonte === "Google Places") return lugar;
-    if (lugar.placeId && !lugar.placeId.startsWith("recomendacao-") && !lugar.placeId.startsWith("fallback-")) {
+    if (parecePlaceIdGoogle(lugar.placeId)) {
       try {
         const detalhe = await detalhesLugar(lugar.placeId.replace(/^places\//, ""));
         if (lugarTemDadosReais(detalhe)) return detalhe;
@@ -2006,9 +2007,10 @@ function AssistantView({
     recomendacao: Recomendacao,
     destino: string,
   ): Promise<Lugar | null> {
-    if (recomendacao.placeId) {
+    const placeIdGoogle = recomendacao.placeId;
+    if (placeIdGoogle && parecePlaceIdGoogle(placeIdGoogle)) {
       try {
-        const detalhe = await detalhesLugar(recomendacao.placeId.replace(/^places\//, ""));
+        const detalhe = await detalhesLugar(placeIdGoogle.replace(/^places\//, ""));
         if (lugarTemDadosReais(detalhe)) return detalhe;
       } catch {
         // O texto completo abaixo continua sendo usado como segunda tentativa.
