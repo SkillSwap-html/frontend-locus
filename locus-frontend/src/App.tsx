@@ -64,6 +64,7 @@ import type {
   Lugar,
   MensagemAssistente,
   ModoOrcamento,
+  Moeda,
   Preferencias,
   Recomendacao,
   Relatorio,
@@ -100,6 +101,11 @@ const dataPadrao = {
   mochilao: false,
 };
 const HORARIOS_ROTEIRO = ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00"];
+const TAXAS_CAMBIO_REFERENCIA: Record<Moeda, number> = {
+  BRL: 1,
+  USD: Number(import.meta.env["VITE_USD_BRL_RATE"]) || 5.75,
+  EUR: Number(import.meta.env["VITE_EUR_BRL_RATE"]) || 6.20,
+};
 
 function campo<T = unknown>(obj: unknown, chave: string): T | undefined {
   if (!obj || typeof obj !== "object") return undefined;
@@ -180,6 +186,45 @@ function ordenarLugares(lugares: Lugar[], referencia?: Pick<Lugar, "lat" | "lng"
 function lugarEhHospedagem(lugar: Lugar): boolean {
   const textoLugar = [lugar.nome, lugar.categoria, ...(lugar.tipos ?? [])].join(" ").toLowerCase();
   return /hotel|hospedagem|pousada|hostel|resort|alojamento|lodging/.test(textoLugar);
+}
+function moedaDoDestino(destino: string): Moeda {
+  const textoDestino = destino.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (/brasil|brazil|salvador|sao paulo|rio de janeiro|recife|fortaleza|curitiba|florianopolis/.test(textoDestino)) return "BRL";
+  if (/franca|france|paris|italia|italy|roma|rome|espanha|spain|madrid|barcelona|portugal|lisboa|germany|alemanha|berlin|grecia|greece|amsterdam|paises baixos|holanda|viena|austria|irlanda|ireland|belgica|belgium|suica|switzerland|noruega|norway|suecia|sweden|dinamarca|denmark|finlandia|finland/.test(textoDestino)) return "EUR";
+  return "USD";
+}
+function formatarMoeda(valor: number, moeda: Moeda): string {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: moeda }).format(valor);
+}
+type CustosEstimados = NonNullable<Recomendacao["custos"]>;
+function estimativasDoLocal(lugar: Lugar, destino: string): { custos: CustosEstimados; totalBrl: number } {
+  const textoLugar = [lugar.nome, lugar.categoria, ...(lugar.tipos ?? [])].join(" ").toLowerCase();
+  const moeda = moedaDoDestino(`${destino} ${lugar.endereco ?? ""}`);
+  const valores = moeda === "BRL"
+    ? { visitas: 45, alimentacao: 60, transporteLocal: 35, extras: 20 }
+    : { visitas: 15, alimentacao: 20, transporteLocal: 7, extras: 5 };
+  if (/restaurant|restaurante|cafe|cafe|bar|comida|gastronomia/.test(textoLugar)) {
+    valores.visitas = 0;
+    valores.alimentacao = moeda === "BRL" ? 90 : 24;
+  } else if (/beach|praia|park|parque|natural|praca|praça/.test(textoLugar)) {
+    valores.visitas = 0;
+    valores.alimentacao = moeda === "BRL" ? 55 : 16;
+  } else if (/museum|museu|tourist|turist|historical|histor|aquarium|aquario/.test(textoLugar)) {
+    valores.visitas = moeda === "BRL" ? 45 : 18;
+  }
+  const taxa = TAXAS_CAMBIO_REFERENCIA[moeda];
+  const custos = (Object.entries(valores) as [CategoriaOrcamento, number][]).reduce<CustosEstimados>((resultado, [categoria, valor]) => {
+    resultado[categoria] = {
+      valor,
+      valorBrl: Math.round(valor * taxa * 100) / 100,
+      moeda,
+    };
+    return resultado;
+  }, {});
+  return {
+    custos,
+    totalBrl: Object.values(custos).reduce((total, custo) => total + Number(custo?.valorBrl ?? 0), 0),
+  };
 }
 function estimativaLocal(lugar: Lugar): { categoria: CategoriaOrcamento; valor: number; rotulo: string } {
   const textoLugar = [lugar.nome, lugar.categoria, ...(lugar.tipos ?? [])].join(" ").toLowerCase();
@@ -1446,6 +1491,15 @@ function AssistantView({
     const fator = limite / total;
     return Object.fromEntries(valores.map(([categoria, valor]) => [categoria, Math.max(1, Math.floor(Number(valor) * fator))]));
   }
+  function completarSugestaoOrcamento(sugestao: Partial<Record<CategoriaOrcamento, number>>): Partial<Record<CategoriaOrcamento, number>> {
+    const base = sugestaoOrcamento();
+    const resultado: Partial<Record<CategoriaOrcamento, number>> = { ...base };
+    (Object.keys(base) as CategoriaOrcamento[]).forEach((categoria) => {
+      const valor = Number(sugestao[categoria]);
+      if (Number.isFinite(valor) && valor > 0) resultado[categoria] = valor;
+    });
+    return resultado;
+  }
   async function enviar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!texto.trim() || enviando) return;
@@ -1485,17 +1539,23 @@ function AssistantView({
         ...(hospedagemBase ? { hospedagemBase: `${hospedagemBase.nome} (${hospedagemBase.lat}, ${hospedagemBase.lng})` } : {}),
         roteiro: viagem?.roteiro.map((item) => `dia ${item.dia}: ${item.titulo}`).join(" | "),
       });
-      const sugestaoResposta = resposta.orcamentoSugerido ?? (perguntaPedeOrcamento(pergunta) ? sugestaoOrcamento() : undefined);
+      const destinoAtual = viagem?.destino || preferencias?.destino || "";
+      const sugestaoRespostaBruta = resposta.orcamentoSugerido ?? (perguntaPedeOrcamento(pergunta) ? sugestaoOrcamento() : undefined);
+      const sugestaoResposta = sugestaoRespostaBruta ? completarSugestaoOrcamento(sugestaoRespostaBruta) : undefined;
       const respostaComOrcamento: MensagemAssistente = {
         ...resposta,
         ...(sugestaoResposta
-          ? { orcamentoSugerido: limitarSugestaoOrcamento(sugestaoResposta) }
+          ? {
+              orcamentoSugerido: limitarSugestaoOrcamento(sugestaoResposta),
+              orcamentoMoeda: moedaDoDestino(destinoAtual),
+              orcamentoCambio: TAXAS_CAMBIO_REFERENCIA[moedaDoDestino(destinoAtual)],
+            }
           : {}),
       };
       // Mostra a resposta textual imediatamente. Places e rotas enriquecem a
       // mensagem, mas não podem bloquear a conversa enquanto são consultados.
       setMensagens((atuais) => atuais.map((item) => item.id === idResposta ? { ...respostaComOrcamento, id: idResposta } : item));
-      const destinoBusca = viagem?.destino || preferencias?.destino || "";
+      const destinoBusca = destinoAtual;
       const consultasDaIa = (resposta.consultas ?? [])
         .map((consulta) => consulta.trim())
         .filter((consulta) => consulta.length > 4)
@@ -1553,6 +1613,9 @@ function AssistantView({
           : 1;
         const recomendacoesReais: Recomendacao[] = organizados.slice(0, 12).map((lugar, index) => {
           const estimativa = estimativaLocal(lugar);
+          const estimativas = estimativasDoLocal(lugar, destinoBusca);
+          const valorDaCategoria = estimativas.custos[estimativa.categoria]?.valorBrl ?? estimativa.valor;
+          const custoPrincipal = estimativas.custos[estimativa.categoria];
           const origemConsulta = placesEmFallback
             ? "Opção de exemplo para manter o planejamento enquanto a cota do Google Places é recomposta."
             : "Encontrado no Google Places; confira o Street View antes de adicionar.";
@@ -1561,12 +1624,13 @@ function AssistantView({
           placeId: lugar.placeId,
           tipo: "lugar",
           titulo: lugar.nome,
-          resumo: `${lugar.categoria} · ${lugar.endereco || "localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""}${estimativa.valor > 0 ? ` · ${brl(estimativa.valor)} (${estimativa.rotulo})` : ` · ${estimativa.rotulo}`}`,
+          resumo: `${lugar.categoria} · ${lugar.endereco || "localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""}${valorDaCategoria > 0 && custoPrincipal ? ` · ${formatarMoeda(custoPrincipal.valor, custoPrincipal.moeda)} ≈ ${brl(valorDaCategoria)} (${estimativa.rotulo})` : ` · ${estimativa.rotulo}`}`,
           justificativa: `${hospedagemBase ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}. ` : ""}${origemConsulta} Confira o Street View antes de adicionar. O valor é uma estimativa e será somado somente se você adicionar o local.`,
           evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
           categoria: estimativa.categoria,
-          ...(estimativa.valor > 0 ? { valor: estimativa.valor } : {}),
-          natureza: estimativa.valor > 0 ? "estimado" : "observado",
+          custos: estimativas.custos,
+          ...(valorDaCategoria > 0 ? { valor: valorDaCategoria } : {}),
+          natureza: valorDaCategoria > 0 ? "estimado" : "observado",
           ...(lugar.avaliacao ? { avaliacao: lugar.avaliacao } : {}),
           ...(lugar.endereco ? { endereco: lugar.endereco } : {}),
           ...(Number.isFinite(lugar.lat) ? { lat: lugar.lat } : {}),
@@ -1577,7 +1641,16 @@ function AssistantView({
           };
         });
         const recomendacoesDaIa = respostaComOrcamento.recomendacoes ?? [];
-        const recomendacoesComDetalhes = [...recomendacoesReais, ...recomendacoesDaIa]
+        const recomendacoesDaIaComCustos = recomendacoesDaIa.map((recomendacao) => {
+          const lugar = lugarDaRecomendacao(recomendacao);
+          if (!lugar) return recomendacao;
+          const estimativas = estimativasDoLocal(lugar, destinoBusca);
+          return {
+            ...recomendacao,
+            custos: recomendacao.custos ?? estimativas.custos,
+          };
+        });
+        const recomendacoesComDetalhes = [...recomendacoesReais, ...recomendacoesDaIaComCustos]
           .filter((recomendacao, index, todas) => {
             const titulo = recomendacao.titulo.trim().toLocaleLowerCase();
             return todas.findIndex((candidata) => {
@@ -1598,9 +1671,18 @@ function AssistantView({
       } else {
         setLugares([]);
         setRota([]);
-        const possuiRecomendacoesDaIa = Boolean(respostaComOrcamento.recomendacoes?.length);
+        const recomendacoesDaIaComCustos = respostaComOrcamento.recomendacoes?.map((recomendacao) => {
+          const lugar = lugarDaRecomendacao(recomendacao);
+          if (!lugar) return recomendacao;
+          return {
+            ...recomendacao,
+            custos: recomendacao.custos ?? estimativasDoLocal(lugar, destinoBusca).custos,
+          };
+        });
+        const possuiRecomendacoesDaIa = Boolean(recomendacoesDaIaComCustos?.length);
         respostaFinal = {
           ...respostaComOrcamento,
+          ...(recomendacoesDaIaComCustos?.length ? { recomendacoes: recomendacoesDaIaComCustos } : {}),
           texto: falhasBusca || placesEmFallback
             ? `${respostaComOrcamento.texto} ${possuiRecomendacoesDaIa ? "A IA encontrou recomendações com nome e endereço para você conferir no Google." : "A consulta automática de lugares está temporariamente indisponível; tente novamente em alguns segundos."}`
             : possuiRecomendacoesDaIa
@@ -1629,7 +1711,10 @@ function AssistantView({
         ...(hospedagemBase ? { hospedagemBase: hospedagemBase.nome } : {}),
       });
       if (fallback.orcamentoSugerido) {
-        fallback.orcamentoSugerido = limitarSugestaoOrcamento(fallback.orcamentoSugerido);
+        fallback.orcamentoSugerido = limitarSugestaoOrcamento(completarSugestaoOrcamento(fallback.orcamentoSugerido));
+        const moeda = moedaDoDestino(destinoBusca);
+        fallback.orcamentoMoeda = moeda;
+        fallback.orcamentoCambio = TAXAS_CAMBIO_REFERENCIA[moeda];
       }
       try {
         const consultasFallback = consultasParaLocais(pergunta, destinoBusca);
@@ -1651,19 +1736,22 @@ function AssistantView({
         setLugares(locais);
         const recomendacoes: Recomendacao[] = locais.map((lugar, index) => {
           const estimativa = estimativaLocal(lugar);
+          const estimativas = estimativasDoLocal(lugar, destinoBusca);
+          const valorDaCategoria = estimativas.custos[estimativa.categoria]?.valorBrl ?? estimativa.valor;
           return {
           id: `fallback-${lugar.placeId}`,
           placeId: lugar.placeId,
           tipo: "lugar",
           titulo: lugar.nome,
-          resumo: `${lugar.categoria} · ${lugar.endereco || "Localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""}`,
+          resumo: `${lugar.categoria} · ${lugar.endereco || "Localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""} · custos estimados em ${estimativas.custos.visitas?.moeda ?? "USD"}`,
           justificativa: hospedagemBase
             ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem. Confira no Street View antes de escolher. O valor é uma estimativa.`
             : "Resultado real consultado no Google Places. Confira no Street View antes de escolher. O valor é uma estimativa.",
           evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
           categoria: estimativa.categoria,
-          ...(estimativa.valor > 0 ? { valor: estimativa.valor } : {}),
-          natureza: estimativa.valor > 0 ? "estimado" : "observado",
+          custos: estimativas.custos,
+          ...(valorDaCategoria > 0 ? { valor: valorDaCategoria } : {}),
+          natureza: valorDaCategoria > 0 ? "estimado" : "observado",
           ...(lugar.avaliacao ? { avaliacao: lugar.avaliacao } : {}),
           ...(lugar.endereco ? { endereco: lugar.endereco } : {}),
           lat: lugar.lat,
@@ -1834,6 +1922,8 @@ function AssistantView({
       return;
     }
     const estimativa = estimativaLocal(lugar);
+    const estimativas = estimativasDoLocal(lugar, viagem?.destino || "");
+    const valorDaCategoria = estimativas.custos[estimativa.categoria]?.valorBrl ?? estimativa.valor;
     adicionarRecomendacaoControlada({
       id: `lugar-${lugar.placeId}`,
       tipo: "lugar",
@@ -1847,9 +1937,10 @@ function AssistantView({
       lat: lugar.lat,
       lng: lugar.lng,
       categoriaLocal: lugar.categoria,
-      ...(estimativa.valor > 0 ? { valor: estimativa.valor } : {}),
+      custos: estimativas.custos,
+      ...(valorDaCategoria > 0 ? { valor: valorDaCategoria } : {}),
       categoria: estimativa.categoria,
-      natureza: estimativa.valor > 0 ? "estimado" : "observado",
+      natureza: valorDaCategoria > 0 ? "estimado" : "observado",
       dia: diasLugares[lugar.placeId] ?? 1,
     });
   }
@@ -1938,10 +2029,19 @@ function AssistantView({
                       <div className="chat-budget-suggestion-grid">
                         {CATEGORIAS.map(({ id, rotulo }) => {
                           const valor = mensagem.orcamentoSugerido?.[id];
-                          return valor == null ? null : <span key={id}><small>{rotulo}</small><b>{brl(valor)}</b></span>;
+                          if (valor == null) return null;
+                          const moeda = mensagem.orcamentoMoeda ?? "BRL";
+                          const cambio = mensagem.orcamentoCambio || TAXAS_CAMBIO_REFERENCIA[moeda];
+                          return (
+                            <span key={id}>
+                              <small>{rotulo}</small>
+                              <b>{brl(valor)}</b>
+                              {moeda !== "BRL" && <em>{formatarMoeda(valor / cambio, moeda)} · câmbio de referência</em>}
+                            </span>
+                          );
                         })}
                       </div>
-                      <small>Use como ponto de partida. A IA atualiza o acumulado conforme você escolhe passagens, hospedagem e atividades.</small>
+                      <small>Valores em reais para o orçamento do Locus, com referência em {mensagem.orcamentoMoeda ?? "BRL"}. Alimentação, transporte local e extras entram na estimativa mesmo antes de você escolher cada atividade.</small>
                       <button
                         type="button"
                         className="recommendation-action recommendation-add"
@@ -1974,6 +2074,25 @@ function AssistantView({
                           {recomendacao.justificativa} · {recomendacao.evidencia.fonte}
                           {recomendacao.valor ? ` · ${brl(recomendacao.valor)}` : ""}
                         </small>
+                        {recomendacao.custos && (
+                          <div className="recommendation-costs">
+                            <strong>Estimativa por pessoa</strong>
+                            <div className="recommendation-cost-grid">
+                              {(["visitas", "alimentacao", "transporteLocal", "extras"] as CategoriaOrcamento[]).map((categoria) => {
+                                const custo = recomendacao.custos?.[categoria];
+                                if (!custo) return null;
+                                return (
+                                  <span key={categoria}>
+                                    <small>{CATEGORIAS.find((item) => item.id === categoria)?.rotulo ?? categoria}</small>
+                                    <b>{formatarMoeda(custo.valor, custo.moeda)}</b>
+                                    <em>≈ {brl(custo.valorBrl)}</em>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                            <small>Estimativa de referência; confirme o preço no local. O equivalente em reais usa o câmbio configurado no frontend.</small>
+                          </div>
+                        )}
                       </div>
                       {(recomendacao.tipo === "lugar" || recomendacao.tipo === "atividade") && viagem && (
                         <div className="recommendation-schedule">
@@ -2213,11 +2332,6 @@ function AssistantView({
                 className="street-view-frame location-modal-view"
               />
             )}
-            <div className="street-view-modal-status">
-              {modoVisualizacao === "mapa"
-                ? "Mapa carregado dentro da plataforma. Use os controles do próprio mapa para conferir a posição do local."
-                : "O Locus procura uma panorâmica pública progressivamente até 30 km do local e inicia diretamente no ponto encontrado. Se não houver cobertura nesta região, utilize a aba Mapa para conferir a posição."}
-            </div>
             <div className="street-view-modal-actions">
               <button type="button" className="secondary-button" onClick={() => setStreetViewSelecionado(null)}>Fechar</button>
             </div>

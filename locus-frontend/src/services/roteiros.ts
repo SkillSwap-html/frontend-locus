@@ -129,11 +129,17 @@ export async function adicionarRecomendacao(
     // uma refeição nem o deslocamento do viajante. O Locus registra essas duas
     // parcelas separadamente como estimativas, para que o resumo e o PDF não
     // fiquem zerados e para que cada atração tenha seu próprio custo.
-    const alimentacao = recomendacao.categoria === "alimentacao" ? 0 : 60;
-    const transporteLocal = recomendacao.categoria === "transporteLocal" ? 0 : 35;
+    const alimentacao = recomendacao.categoria === "alimentacao"
+      ? 0
+      : Math.max(0, Number(recomendacao.custos?.alimentacao?.valorBrl ?? 60));
+    const transporteLocal = recomendacao.categoria === "transporteLocal"
+      ? 0
+      : Math.max(0, Number(recomendacao.custos?.transporteLocal?.valorBrl ?? 35));
+    const extras = Math.max(0, Number(recomendacao.custos?.extras?.valorBrl ?? 20));
     const estimativas = [
       { categoria: "ALIMENTACAO", descricao: `${recomendacao.titulo} - alimentação estimada`, valor: alimentacao },
       { categoria: "TRANSPORTE_LOCAL", descricao: `${recomendacao.titulo} - transporte local estimado`, valor: transporteLocal },
+      { categoria: "EXTRAS", descricao: `${recomendacao.titulo} - extras estimados`, valor: extras },
     ];
     for (const estimativa of estimativas) {
       if (estimativa.valor <= 0) continue;

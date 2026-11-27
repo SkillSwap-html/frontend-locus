@@ -63,7 +63,7 @@ export function GoogleStreetView({
           // primeiro perto do endereço e ampliamos somente se necessário,
           // sempre usando a posição retornada pelo Street View.
           new google.maps.StreetViewService().getPanorama(
-            { location: { lat, lng }, radius: raio },
+            { location: { lat, lng }, radius: raio, source: "outdoor" },
             (data, status) => {
               if (!ativo) return;
               const position = data?.location?.latLng;

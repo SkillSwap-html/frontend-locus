@@ -2,6 +2,7 @@ export type Transporte = "aviao" | "onibus" | "carro" | "moto" | "particular";
 export type ModoOrcamento = "fixo" | "aberto";
 export type CategoriaOrcamento =
   "passagem" | "hospedagem" | "visitas" | "alimentacao" | "transporteLocal" | "extras";
+export type Moeda = "BRL" | "USD" | "EUR";
 export type NaturezaValor = "observado" | "historico" | "estimado" | "simulado";
 export type PrioridadeTransporte = "OBRIGATORIA" | "DESEJAVEL" | "INDIFERENTE";
 
@@ -203,6 +204,11 @@ export interface Recomendacao {
   duracaoMinutos?: number;
   valor?: number;
   categoria?: CategoriaOrcamento;
+  custos?: Partial<Record<CategoriaOrcamento, {
+    valor: number;
+    valorBrl: number;
+    moeda: Moeda;
+  }>>;
   natureza?: NaturezaValor;
   estado?: "aceita" | "rejeitada";
 }
@@ -213,6 +219,8 @@ export interface MensagemAssistente {
   texto: string;
   recomendacoes?: Recomendacao[];
   orcamentoSugerido?: Partial<Record<CategoriaOrcamento, number>>;
+  orcamentoMoeda?: Moeda;
+  orcamentoCambio?: number;
   consultas?: string[];
   etapa?: "passagem" | "hospedagem" | "roteiro" | "geral";
   incompleta?: boolean;
