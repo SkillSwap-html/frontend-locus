@@ -52,6 +52,7 @@ import { criarViagem, definirLimitesOrcamento, listarNotificacoes, listarViagens
 import { MapPreview } from "@/components/MapPreview";
 import { GoogleEmbedMap } from "@/components/GoogleEmbedMap";
 import { GoogleStreetView } from "@/components/GoogleStreetView";
+import { buscarPanoramaMaisProximo } from "@/services/googleMaps";
 import { AdminView } from "@/components/AdminView";
 import { PlanningFlow } from "@/components/PlanningFlow";
 import { PreferencesView } from "@/components/PreferencesView";
@@ -1582,8 +1583,14 @@ function AssistantView({
           }),
         ),
       );
-      const encontrados = resultados.flatMap((item) => item.lugares);
-      const placesEmFallback = resultados.some((item) => item.fallback);
+      const encontrados = resultados
+        .filter((item) => !item.fallback)
+        .flatMap((item) => item.lugares)
+        .filter((lugar) => Boolean(lugar.placeId)
+          && Boolean(lugar.endereco?.trim())
+          && Number.isFinite(lugar.lat)
+          && Number.isFinite(lugar.lng));
+      const placesEmFallback = resultados.length > 0 && resultados.every((item) => item.fallback);
       let respostaFinal = respostaComOrcamento;
       if (encontrados.length) {
         const unicos = [...new globalThis.Map(encontrados.map((item) => [item.placeId, item])).values()];
@@ -1615,16 +1622,15 @@ function AssistantView({
           const estimativas = estimativasDoLocal(lugar, destinoBusca);
           const valorDaCategoria = estimativas.custos[estimativa.categoria]?.valorBrl ?? estimativa.valor;
           const custoPrincipal = estimativas.custos[estimativa.categoria];
-          const origemConsulta = placesEmFallback
-            ? "Opção de exemplo para manter o planejamento enquanto a cota do Google Places é recomposta."
-            : "Encontrado no Google Places; confira o Street View antes de adicionar.";
           return {
           id: `lugar-${lugar.placeId}`,
           placeId: lugar.placeId,
           tipo: "lugar",
           titulo: lugar.nome,
           resumo: `${lugar.categoria} · ${lugar.endereco || "localização consultada"}${lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""}${valorDaCategoria > 0 && custoPrincipal ? ` · ${formatarMoeda(custoPrincipal.valor, custoPrincipal.moeda)} ≈ ${brl(valorDaCategoria)} (${estimativa.rotulo})` : ` · ${estimativa.rotulo}`}`,
-          justificativa: `${hospedagemBase ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}. ` : ""}${origemConsulta} Confira o Street View antes de adicionar. O valor é uma estimativa e será somado somente se você adicionar o local.`,
+          justificativa: hospedagemBase
+            ? `${distanciaKm(hospedagemBase, lugar).toFixed(1)} km da hospedagem ${hospedagemBase.nome}.`
+            : "",
           evidencia: { fonte: lugar.fonte, consultadoEm: lugar.consultadoEm },
           categoria: estimativa.categoria,
           custos: estimativas.custos,
@@ -1639,7 +1645,8 @@ function AssistantView({
           dia: Math.min(diasDeViagem, Math.floor(index / 3) + 1),
           };
         });
-        const recomendacoesDaIa = respostaComOrcamento.recomendacoes ?? [];
+        const recomendacoesDaIa = (respostaComOrcamento.recomendacoes ?? [])
+          .filter((recomendacao) => Boolean(recomendacao.endereco?.trim()));
         const recomendacoesDaIaComCustos = recomendacoesDaIa.map((recomendacao) => {
           const lugar = lugarDaRecomendacao(recomendacao);
           if (!lugar) return recomendacao;
@@ -1670,14 +1677,16 @@ function AssistantView({
       } else {
         setLugares([]);
         setRota([]);
-        const recomendacoesDaIaComCustos = respostaComOrcamento.recomendacoes?.map((recomendacao) => {
+        const recomendacoesDaIaComCustos = respostaComOrcamento.recomendacoes
+          ?.filter((recomendacao) => Boolean(recomendacao.endereco?.trim()))
+          .map((recomendacao) => {
           const lugar = lugarDaRecomendacao(recomendacao);
           if (!lugar) return recomendacao;
           return {
             ...recomendacao,
             custos: recomendacao.custos ?? estimativasDoLocal(lugar, destinoBusca).custos,
           };
-        });
+          });
         const possuiRecomendacoesDaIa = Boolean(recomendacoesDaIaComCustos?.length);
         respostaFinal = {
           ...respostaComOrcamento,
@@ -1721,7 +1730,15 @@ function AssistantView({
           [...new Set([...consultasFallback, destinoBusca ? `${pergunta} em ${destinoBusca}` : pergunta])]
             .slice(0, 6)
             .map((consulta) => buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }))),
-        ).then((resultados) => ({ lugares: resultados.flatMap((item) => item.lugares) }));
+        ).then((resultados) => ({
+          lugares: resultados
+            .filter((item) => !item.fallback)
+            .flatMap((item) => item.lugares)
+            .filter((lugar) => Boolean(lugar.placeId)
+              && Boolean(lugar.endereco?.trim())
+              && Number.isFinite(lugar.lat)
+              && Number.isFinite(lugar.lng)),
+        }));
         const pedidoHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/i.test(pergunta);
         const locaisRelevantes = pedidoHospedagem
           ? resultado.lugares
@@ -1804,11 +1821,17 @@ function AssistantView({
     }
   }
   async function resolverLugarComCoordenadas(lugar: Lugar): Promise<Lugar | null> {
-    if (Number.isFinite(lugar.lat) && Number.isFinite(lugar.lng) && !(lugar.lat === 0 && lugar.lng === 0)) return lugar;
+    if (Number.isFinite(lugar.lat)
+      && Number.isFinite(lugar.lng)
+      && !(lugar.lat === 0 && lugar.lng === 0)
+      && lugar.endereco?.trim()) return lugar;
     const consulta = [lugar.nome, lugar.endereco].filter(Boolean).join(", ");
     if (!consulta) return null;
     const resultado = await buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }));
-    return resultado.lugares.find((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng) && !(item.lat === 0 && item.lng === 0)) ?? null;
+    return resultado.lugares.find((item) => Boolean(item.endereco?.trim())
+      && Number.isFinite(item.lat)
+      && Number.isFinite(item.lng)
+      && !(item.lat === 0 && item.lng === 0)) ?? null;
   }
   async function visualizarLugar(lugar: Lugar, modo: "mapa" | "streetview") {
     const lugarResolvido = await resolverLugarComCoordenadas(lugar);
@@ -1817,23 +1840,42 @@ function AssistantView({
       return;
     }
     setModoVisualizacao(modo);
-    const metaExistente = streetViews[lugarResolvido.placeId];
-    if (metaExistente && (modo === "mapa" || metaExistente.status !== "PENDING")) {
-      setStreetViewSelecionado({ lugar: lugarResolvido, meta: metaExistente });
-      return;
-    }
     if (modo === "mapa") {
-      const meta: StreetViewMeta = { status: "PENDING" };
+      const meta: StreetViewMeta = { status: "READY" };
       setStreetViews((atual) => ({ ...atual, [lugarResolvido.placeId]: meta }));
       setStreetViewSelecionado({ lugar: lugarResolvido, meta });
       return;
     }
-    // O modal usa a Maps Embed API diretamente. O Google escolhe a
-    // panorâmica mais próxima a partir das coordenadas, sem consultar a API
-    // Street View no backend e sem abrir uma nova aba.
-    const meta: StreetViewMeta = { status: "READY" };
+    const metaExistente = streetViews[lugarResolvido.placeId];
+    if (metaExistente && metaExistente.status !== "PENDING" && metaExistente.status !== "READY") {
+      setStreetViewSelecionado({ lugar: lugarResolvido, meta: metaExistente });
+      return;
+    }
+    const meta: StreetViewMeta = { status: "PENDING" };
     setStreetViews((atual) => ({ ...atual, [lugarResolvido.placeId]: meta }));
     setStreetViewSelecionado({ lugar: lugarResolvido, meta });
+    try {
+      const panorama = await buscarPanoramaMaisProximo(lugarResolvido.lat, lugarResolvido.lng);
+      const metaAtualizada: StreetViewMeta = panorama
+        ? {
+            status: "OK",
+            panoramaLat: panorama.lat,
+            panoramaLng: panorama.lng,
+            raioBuscaMetros: panorama.raioBuscaMetros,
+          }
+        : { status: "ZERO_RESULTS" };
+      setStreetViews((atual) => ({ ...atual, [lugarResolvido.placeId]: metaAtualizada }));
+      setStreetViewSelecionado((atual) => atual?.lugar.placeId === lugarResolvido.placeId
+        ? { ...atual, meta: metaAtualizada }
+        : atual);
+    } catch {
+      // O iframe continua usando o ponto exato mesmo se a API JavaScript não
+      // estiver habilitada na chave; isso não impede o modal de abrir.
+      setStreetViews((atual) => ({
+        ...atual,
+        [lugarResolvido.placeId]: { status: "EXACT_POINT" },
+      }));
+    }
   }
   function revisarLugar(lugar: Lugar, _recomendacao?: Recomendacao) {
     void visualizarLugar(lugar, "streetview");
@@ -2321,6 +2363,7 @@ function AssistantView({
               <GoogleEmbedMap
                 nome={streetViewSelecionado.lugar.nome}
                 endereco={streetViewSelecionado.lugar.endereco}
+                placeId={streetViewSelecionado.lugar.placeId}
                 lat={streetViewSelecionado.lugar.lat}
                 lng={streetViewSelecionado.lugar.lng}
               />
@@ -2328,6 +2371,12 @@ function AssistantView({
               <GoogleStreetView
                 lat={streetViewSelecionado.lugar.lat}
                 lng={streetViewSelecionado.lugar.lng}
+                {...(streetViewSelecionado.meta.panoramaLat != null
+                  ? { panoramaLat: streetViewSelecionado.meta.panoramaLat }
+                  : {})}
+                {...(streetViewSelecionado.meta.panoramaLng != null
+                  ? { panoramaLng: streetViewSelecionado.meta.panoramaLng }
+                  : {})}
                 imagemUrl={streetViewSelecionado.meta.imagemUrl}
                 className="street-view-frame location-modal-view"
               />

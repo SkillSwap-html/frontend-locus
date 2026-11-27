@@ -8,6 +8,7 @@ function limparChave(valor: unknown): string {
 export function chaveGoogleMapsEmbed(): string {
   return limparChave(
     import.meta.env["VITE_GOOGLE_MAPS_EMBED_API_KEY"]
+      || import.meta.env["VITE_GOOGLE_MAPS_EMBED_API"]
       || import.meta.env["VITE_GOOGLE_MAPS_API_KEY"],
   );
 }

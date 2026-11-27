@@ -599,7 +599,7 @@ export async function buscaTextual(q: string): Promise<ResultadoBusca> {
   const cacheado = cacheBusca.get(chave);
   if (cacheado && cacheado.expiraEm > Date.now()) return cacheado.resultado;
   if (placesIndisponivelAte > Date.now()) {
-    const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
+    const resultado = { lugares: [], fallback: true };
     cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   }
@@ -610,13 +610,13 @@ export async function buscaTextual(q: string): Promise<ResultadoBusca> {
     const places = Array.isArray(raw.places) ? raw.places : [];
     const resultado = places.length
       ? { lugares: places.map(normalizarLugar), fallback: false }
-      : { lugares: lugaresDemonstrativos(q), fallback: true };
+      : { lugares: [], fallback: true };
     cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   } catch (error) {
     if (placesFoiLimitado(error) || error instanceof LocusError) {
       placesIndisponivelAte = Date.now() + CACHE_PLACES_MS;
-      const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
+      const resultado = { lugares: [], fallback: true };
       cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
       return resultado;
     }
@@ -716,6 +716,9 @@ export interface StreetViewMeta {
   imagemUrl?: string;
   embedUrl?: string;
   data?: string;
+  panoramaLat?: number;
+  panoramaLng?: number;
+  raioBuscaMetros?: number;
 }
 
 export async function streetViewMetadata(lat: number, lng: number, radius = 150): Promise<StreetViewMeta> {
