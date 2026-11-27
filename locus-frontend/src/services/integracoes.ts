@@ -167,6 +167,23 @@ function sugestoesLocaisFallback(valor: string): { id: string; texto: string }[]
     : [];
 }
 
+function diariasHospedagemExemplo(cidade: string): readonly [number, number, number] {
+  const destino = normalizarBusca(cidade);
+  if (/paris|londres|london|zurique|zurich|nova york|new york/.test(destino)) {
+    return [820, 1150, 1550];
+  }
+  if (/lisboa|lisbon|madeira|funchal|porto/.test(destino)) {
+    return [520, 720, 980];
+  }
+  if (/curacao|willemstad|aruba/.test(destino)) {
+    return [680, 900, 1250];
+  }
+  if (/salvador|recife|fortaleza|natal|rio de janeiro|sao paulo/.test(destino)) {
+    return [360, 520, 760];
+  }
+  return [420, 620, 900];
+}
+
 const IMAGENS_HOSPEDAGEM_EXEMPLO = [
   "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=900&q=80",
   "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=900&q=80",
@@ -184,10 +201,11 @@ function hospedagensExemplo(params: Record<string, string | number>): OfertaHote
     : 1;
   const destino = destinoParaExemplo(cidade);
   const agora = new Date().toISOString();
+  const diarias = diariasHospedagemExemplo(cidade);
   const opcoes = [
-    ["Locus Central Hotel", 320],
-    ["Rota Verde Suites", 420],
-    ["Maré Alta Resort", 580],
+    ["Locus Central Hotel", diarias[0]],
+    ["Rota Verde Suites", diarias[1]],
+    ["Maré Alta Resort", diarias[2]],
   ] as const;
   return opcoes.map(([hotel, diaria], index) => ({
     id: `hotel-exemplo-${normalizarBusca(cidade).replace(/[^a-z0-9]+/g, "-")}-${index}`,
@@ -488,14 +506,24 @@ export function respostaLocalAssistente(textoPergunta: string, contexto?: Contex
     : `Saldo disponível aproximado: R$ ${Math.max(0, contexto.limite - (contexto.acumulado ?? 0)).toFixed(2)}.`;
   const valores = contexto?.orcamentoDetalhado ? ` ${contexto.orcamentoDetalhado}` : "";
   const querOrcamento = /orçamento|orcamento|quanto.*gasto|quanto.*levar|valor.*viagem|gastos?|custos?|preço total|preco total|definir valores|limites?|categorias?.*(visitas|alimentação|transporte|extras)/.test(pergunta);
+  const destinoNormalizado = destino ? normalizarBusca(destino) : "";
+  const viagemInternacional = destinoNormalizado.length > 0
+    && !/brasil|brazil|salvador|sao paulo|rio de janeiro|recife|fortaleza|natal|curitiba|florianopolis/.test(destinoNormalizado);
   const orcamentoSugerido = querOrcamento && destino
     ? {
-        passagem: contexto?.transporte === "onibus" ? 900 : contexto?.transporte === "carro" || contexto?.transporte === "moto" ? 650 : 2200,
-        hospedagem: 2800,
-        visitas: 600,
-        alimentacao: 1200,
-        transporteLocal: 450,
-        extras: 350,
+        // Referência para uma viagem de aproximadamente cinco dias. São
+        // valores iniciais em reais; as escolhas confirmadas substituem essa
+        // referência pelos custos calculados de cada oferta e atividade.
+        passagem: contexto?.transporte === "onibus"
+          ? 850
+          : contexto?.transporte === "carro" || contexto?.transporte === "moto"
+            ? 700
+            : viagemInternacional ? 4200 : 1200,
+        hospedagem: viagemInternacional ? 4800 : 2600,
+        visitas: viagemInternacional ? 850 : 500,
+        alimentacao: viagemInternacional ? 2100 : 1100,
+        transporteLocal: viagemInternacional ? 700 : 450,
+        extras: viagemInternacional ? 500 : 300,
       }
     : undefined;
   return {
