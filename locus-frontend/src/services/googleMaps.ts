@@ -22,7 +22,7 @@ type GoogleMapsNamespace = {
 let carregamento: Promise<GoogleMapsNamespace> | null = null;
 
 export function carregarGoogleMaps(): Promise<GoogleMapsNamespace> {
-  const chave = String(import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "")
+  const chave = String(import.meta.env["VITE_GOOGLE_MAPS_API_KEY"] ?? "")
     .trim()
     .replace(/^['"]|['"]$/g, "")
     .replace(/\\([:/])/g, "$1");
@@ -34,7 +34,7 @@ export function carregarGoogleMaps(): Promise<GoogleMapsNamespace> {
   if (existente?.maps) return Promise.resolve(existente);
   if (carregamento) return carregamento;
 
-  carregamento = new Promise((resolve, reject) => {
+  carregamento = new Promise<GoogleMapsNamespace>((resolve, reject) => {
     const janela = window as Window & {
       google?: GoogleMapsNamespace;
       gm_authFailure?: () => void;

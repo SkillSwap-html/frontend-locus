@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { BedDouble, Check, ExternalLink, MapPin, Plane, Search, Sparkles, X } from "lucide-react";
+import { BedDouble, Check, MapPin, Plane, Search, Sparkles, X } from "lucide-react";
 import { autocomplete, buscarHoteis, buscarLocalizacoes, buscarVoos } from "@/services/integracoes";
 import type { CategoriaOrcamento, OfertaHotel, OfertaVoo, Recomendacao, Viagem } from "@/types";
 
@@ -179,6 +179,7 @@ export function PlanningFlow({
   acumulado = 0,
   onToast,
   onAdicionar,
+  onVisualizarMapa,
 }: {
   viagem: Viagem | null;
   etapaInicial: "passagem" | "hospedagem" | "roteiro" | "geral";
@@ -186,6 +187,7 @@ export function PlanningFlow({
   acumulado?: number;
   onToast: (value: string) => void;
   onAdicionar: (recomendacao: Recomendacao) => void;
+  onVisualizarMapa?: (hotel: OfertaHotel) => void;
 }) {
   const [etapa, setEtapa] = useState<Etapa>(etapaInicial === "hospedagem" ? "hospedagem" : etapaInicial === "roteiro" ? "roteiro" : "passagem");
   const [origem, setOrigem] = useState(valorInicialLocal(viagem?.origem, "GRU"));
@@ -421,7 +423,7 @@ export function PlanningFlow({
             </>}
             <small className="planning-source">{ofertaSelecionada.valor.fonte}. O valor será somado ao total da viagem.</small>
             <div className="offer-modal-actions"><button className="secondary-button" type="button" onClick={() => setOfertaSelecionada(null)}>Voltar</button><button className="primary-button" type="button" onClick={confirmarOferta}><Check size={15} /> Adicionar ao roteiro</button></div>
-            {ofertaSelecionada.tipo === "hospedagem" && ofertaSelecionada.valor.latitude && ofertaSelecionada.valor.longitude && <a className="offer-map-link" href={`https://www.google.com/maps/search/?api=1&query=${ofertaSelecionada.valor.latitude},${ofertaSelecionada.valor.longitude}`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Ver localização no Google Maps</a>}
+            {ofertaSelecionada.tipo === "hospedagem" && ofertaSelecionada.valor.latitude != null && ofertaSelecionada.valor.longitude != null && onVisualizarMapa && <button className="offer-map-link" type="button" onClick={() => onVisualizarMapa(ofertaSelecionada.valor)}><MapPin size={13} /> Ver localização no mapa</button>}
           </div>
         </div>
       )}

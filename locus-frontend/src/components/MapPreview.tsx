@@ -1,21 +1,15 @@
 import type { Lugar } from "@/types";
-import { ExternalLink, MapPin } from "lucide-react";
+import { Map, MapPin, ScanEye } from "lucide-react";
 
-function consultaDoLugar(lugar: Lugar): string {
-  return [lugar.nome, lugar.endereco].filter(Boolean).join(", ");
-}
-
-function urlMaps(lugar: Lugar): string {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(consultaDoLugar(lugar))}`;
-}
-
-function urlStreetView(lugar: Lugar): string {
-  // O Google Maps resolve o local pelo nome + endereço e, a partir da página
-  // correta do lugar, permite abrir a panorâmica Street View disponível.
-  return urlMaps(lugar);
-}
-
-export function MapPreview({ lugares }: { lugares: Lugar[] }) {
+export function MapPreview({
+  lugares,
+  onVisualizarMapa,
+  onVisualizarStreetView,
+}: {
+  lugares: Lugar[];
+  onVisualizarMapa?: (lugar: Lugar) => void;
+  onVisualizarStreetView?: (lugar: Lugar) => void;
+}) {
   const principais = lugares.filter((lugar) => lugar.nome).slice(0, 6);
   if (!principais.length) return null;
   const primeiro = principais[0]!;
@@ -26,7 +20,7 @@ export function MapPreview({ lugares }: { lugares: Lugar[] }) {
         <MapPin size={18} />
         <div>
           <strong>Locais encontrados</strong>
-          <span>Abra a localização real no Google Maps ou no Street View.</span>
+          <span>Visualize a localização real no mapa ou no Street View, dentro do Locus.</span>
         </div>
       </div>
       <div className="map-preview-place-list">
@@ -37,19 +31,19 @@ export function MapPreview({ lugares }: { lugares: Lugar[] }) {
               <small>{lugar.endereco || "Endereço não informado"}</small>
             </div>
             <div className="map-preview-place-actions">
-              <a href={urlMaps(lugar)} target="_blank" rel="noreferrer" aria-label={`Abrir ${lugar.nome} no Google Maps`}>
-                <ExternalLink size={12} /> Maps
-              </a>
-              <a href={urlStreetView(lugar)} target="_blank" rel="noreferrer" aria-label={`Abrir ${lugar.nome} no Street View`}>
-                <ExternalLink size={12} /> Street View
-              </a>
+              <button type="button" onClick={() => onVisualizarMapa?.(lugar)} aria-label={`Ver ${lugar.nome} no mapa dentro do Locus`}>
+                <Map size={12} /> Mapa
+              </button>
+              <button type="button" onClick={() => onVisualizarStreetView?.(lugar)} aria-label={`Ver ${lugar.nome} no Street View dentro do Locus`}>
+                <ScanEye size={12} /> Street View
+              </button>
             </div>
           </div>
         ))}
       </div>
       <div className="map-preview-actions">
-        <a href={urlMaps(primeiro)} target="_blank" rel="noreferrer">Abrir no Google Maps <ExternalLink size={13} /></a>
-        <a href={urlStreetView(primeiro)} target="_blank" rel="noreferrer">Abrir Street View <ExternalLink size={13} /></a>
+        <button type="button" onClick={() => onVisualizarMapa?.(primeiro)}>Ver mapa <Map size={13} /></button>
+        <button type="button" onClick={() => onVisualizarStreetView?.(primeiro)}>Ver Street View <ScanEye size={13} /></button>
       </div>
     </div>
   );

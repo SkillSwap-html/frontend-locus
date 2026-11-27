@@ -31,9 +31,9 @@ export function GoogleStreetView({
             pov: { heading: 0, pitch: 0 },
             zoom: 1,
             visible: true,
-            addressControl: true,
+            addressControl: false,
             fullscreenControl: true,
-            linksControl: true,
+            linksControl: false,
             motionTrackingControl: false,
           });
           panorama.addListener("status_changed", () => {

@@ -130,17 +130,21 @@
 .map-preview-place-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .map-preview-place-info small { color: #74768a; font-size: 9px; line-height: 1.3; }
 .map-preview-place-actions { display: flex; flex-shrink: 0; gap: 5px; }
-.map-preview-place a,
-.map-preview-actions a {
+.map-preview-place button,
+.map-preview-actions button {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   color: #4d438f;
   font-size: 10px;
   text-decoration: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
 }
-.map-preview-place a:hover,
-.map-preview-actions a:hover { text-decoration: underline; }
+.map-preview-place button:hover,
+.map-preview-actions button:hover { text-decoration: underline; }
 .map-preview-actions {
   display: flex;
   flex-wrap: wrap;
@@ -511,6 +515,52 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 18px;
+}
+.location-modal {
+  width: min(760px, 100%);
+  max-height: min(92vh, 760px);
+  overflow: auto;
+}
+.location-modal-tabs {
+  display: flex;
+  gap: 7px;
+  margin: 8px 0 12px;
+}
+.location-modal-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dedaf2;
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #5d588d;
+  background: #faf9ff;
+  font-size: 11px;
+  cursor: pointer;
+}
+.location-modal-tabs button.active {
+  border-color: #7667a8;
+  color: #fff;
+  background: #7667a8;
+}
+.location-modal .map-preview {
+  margin: 0;
+  min-height: 360px;
+}
+.location-modal .map-preview-frame,
+.location-modal .street-view-frame,
+.location-modal .street-view-google-canvas {
+  height: 360px;
+  min-height: 360px;
+}
+.location-modal-view {
+  min-height: 360px;
+  border-radius: 16px;
+  background: #f1ece5;
+}
+.location-modal .street-view-google-image {
+  min-height: 360px;
+  object-fit: cover;
 }
 .preferences-form { display: grid; gap: 18px; padding: 22px; }
 .preferences-form > label { display: grid; gap: 6px; color: #68736b; font-size: 11px; }

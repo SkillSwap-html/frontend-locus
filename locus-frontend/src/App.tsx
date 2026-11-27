@@ -40,6 +40,7 @@ import {
   calcularRota,
   perguntarGemini,
   respostaLocalAssistente,
+  streetViewMetadata,
   type StreetViewMeta,
   type Trecho,
 } from "@/services/integracoes";
@@ -50,6 +51,8 @@ import { adicionarRecomendacao, compararVersoes, criarLinkCompartilhamento, cria
 import { limparUsuarioBackend, sincronizarUsuario } from "@/services/usuarioBackend";
 import { criarViagem, definirLimitesOrcamento, listarNotificacoes, listarViagens, marcarLida, marcarTodasComoLidas, obterViagem } from "@/services/viagens";
 import { MapPreview } from "@/components/MapPreview";
+import { GoogleMapCanvas } from "@/components/GoogleMapCanvas";
+import { GoogleStreetView } from "@/components/GoogleStreetView";
 import { AdminView } from "@/components/AdminView";
 import { PlanningFlow } from "@/components/PlanningFlow";
 import { PreferencesView } from "@/components/PreferencesView";
@@ -200,20 +203,27 @@ function consultasParaLocais(pergunta: string, destino: string): string[] {
   const pedeRestaurante = /restaurante|restaurantes|comida|gastronomia|jantar|almoço|almoco|café|cafe/.test(normalizada);
   const pedeAtracao = /ponto|turíst|turist|museu|parque|atraç|visitar|roteiro|lugar|lugares|passeio/.test(normalizada);
   if (pedePassagem && !pedeHospedagem && !pedeAtracao && !pedePraia && !pedeRestaurante) return [];
+  const destinos = destino
+    .split(/\s*[;|]\s*/)
+    .map((item) => item.trim())
+    .filter(Boolean);
   const consultas: string[] = [];
-  if (pedeHospedagem) consultas.push(`hotéis, pousadas e hospedagens reais em ${destino}`);
-  if (pedePraia) consultas.push(`praias reais e lugares para banho em ${destino}`);
-  if (pedeRestaurante) consultas.push(`restaurantes e gastronomia local em ${destino}`);
-  if (pedeAtracao || (!pedeHospedagem && !pedePraia && !pedeRestaurante)) {
-    consultas.push(`pontos turísticos, museus, parques e atrações reais em ${destino}`);
+  for (const local of destinos) {
+    if (pedeHospedagem) consultas.push(`hotéis, pousadas e hospedagens reais em ${local}`);
+    if (pedePraia) consultas.push(`praias reais e lugares para banho em ${local}`);
+    if (pedeRestaurante) consultas.push(`restaurantes e gastronomia local em ${local}`);
+    if (pedeAtracao || (!pedeHospedagem && !pedePraia && !pedeRestaurante)) {
+      consultas.push(`pontos turísticos, museus, parques e atrações reais em ${local}`);
+    }
+    // Para cada cidade, país ou estado informado, consulta também categorias
+    // complementares. Assim uma viagem com múltiplos destinos não fica presa
+    // ao primeiro local da string.
+    if (!pedeHospedagem && (pedeAtracao || pedePraia || pedeRestaurante)) {
+      if (!pedePraia) consultas.push(`praias e atrações naturais em ${local}`);
+      if (!pedeRestaurante) consultas.push(`restaurantes e gastronomia local em ${local}`);
+    }
   }
-  // Um pedido genérico de turismo precisa preencher o chat com categorias
-  // diferentes, mesmo quando a IA devolve uma consulta de hospedagem.
-  if (!pedeHospedagem && (pedeAtracao || pedePraia || pedeRestaurante)) {
-    if (!pedePraia) consultas.push(`praias e atrações naturais em ${destino}`);
-    if (!pedeRestaurante) consultas.push(`restaurantes e gastronomia local em ${destino}`);
-  }
-  return [...new Set(consultas)].slice(0, 4);
+  return [...new Set(consultas)].slice(0, 8);
 }
 function formatarTransporte(value: string): string {
   return (
@@ -395,7 +405,8 @@ function App() {
     try {
       await excluirItemRoteiro(item);
       const gastoRelacionado = (selecionada.orcamento ?? []).filter((gasto) =>
-        gasto.descricao === item.titulo && (gasto.categoria === "visitas" || gasto.categoria === "alimentacao"),
+        (gasto.descricao === item.titulo || gasto.descricao.startsWith(`${item.titulo} -`))
+          && (gasto.categoria === "visitas" || gasto.categoria === "alimentacao" || gasto.categoria === "transporteLocal"),
       );
       await Promise.all(gastoRelacionado.map((gasto) => excluirItemOrcamento(gasto)));
       const atualizada = await obterViagem(selecionada.id);
@@ -431,7 +442,7 @@ function App() {
       setToast("Informe o horário no formato HH:MM.");
       return;
     }
-    const [horaEditada, minutoEditado] = horarioInicio.split(":").map(Number);
+    const [horaEditada = 0, minutoEditado = 0] = horarioInicio.split(":").map(Number);
     const minutosEditados = horaEditada * 60 + minutoEditado;
     if ((minutosEditados - 8 * 60) % 120 !== 0) {
       setToast("Escolha um horário com intervalo de 2 horas: 08:00, 10:00, 12:00, 14:00, 16:00 ou 18:00.");
@@ -440,7 +451,7 @@ function App() {
     const conflitoDeEspacamento = (selecionada?.roteiro ?? [])
       .filter((outro) => outro.id !== item.id && outro.dia === item.dia)
       .some((outro) => {
-        const [horaOutro, minutoOutro] = outro.inicio.split(":").map(Number);
+        const [horaOutro = 0, minutoOutro = 0] = outro.inicio.split(":").map(Number);
         return Math.abs(minutosEditados - (horaOutro * 60 + minutoOutro)) < 120;
       });
     if (conflitoDeEspacamento) {
@@ -893,7 +904,7 @@ function HomeView({
               title="Conversar com a IA"
               text="Transforme uma ideia solta em possibilidades reais."
               tone="purple"
-              onClick={onIA}
+              onClick={() => onIA()}
             />
             <ActionCard
               icon={<Map />}
@@ -1228,7 +1239,7 @@ function TripView({
           <button className="secondary-button" onClick={() => void salvarVersao()} disabled={salvandoVersao || itens.length === 0}>
             {salvandoVersao ? "Salvando..." : "Salvar versão"}
           </button>
-          <button className="secondary-button" onClick={onIA}>
+          <button className="secondary-button" onClick={() => onIA()}>
             <Sparkles size={17} /> Ajustar com IA
           </button>
           {reservaAtiva && !String(reservaAtiva.status).toLowerCase().includes("confirmada") && <button
@@ -1339,7 +1350,7 @@ function AssistantView({
   onAplicarOrcamento,
 }: {
   viagem: Viagem | null;
-  diaInicial?: number;
+    diaInicial?: number | undefined;
   onVoltar: () => void;
   onToast: (value: string) => void;
   onAdicionar: (recomendacao: Recomendacao) => void;
@@ -1361,6 +1372,7 @@ function AssistantView({
     lugar: Lugar;
     meta: StreetViewMeta;
   } | null>(null);
+  const [modoVisualizacao, setModoVisualizacao] = useState<"mapa" | "streetview">("streetview");
   const [preferencias, setPreferencias] = useState<Preferencias | null>(null);
   const [hospedagemBase, setHospedagemBase] = useState<{ nome: string; lat: number; lng: number } | null>(null);
   const [rota, setRota] = useState<Trecho[]>([]);
@@ -1399,7 +1411,7 @@ function AssistantView({
     ? Math.max(1, Math.floor((new Date(`${viagem.dataFim}T12:00:00`).getTime() - new Date(`${viagem.dataInicio}T12:00:00`).getTime()) / 86400000) + 1)
     : 1;
   function diaDaRecomendacao(recomendacao: Recomendacao): number {
-    return Math.max(1, Math.min(totalDias, diasSelecionados[recomendacao.id] ?? recomendacao.dia ?? diasSelecionados.__novo__ ?? 1));
+    return Math.max(1, Math.min(totalDias, diasSelecionados[recomendacao.id] ?? recomendacao.dia ?? diasSelecionados["__novo__"] ?? 1));
   }
   function horarioDaRecomendacao(recomendacao: Recomendacao): string {
     return horariosSelecionados[recomendacao.id] ?? recomendacao.horario ?? "08:00";
@@ -1492,7 +1504,7 @@ function AssistantView({
       const consultaPadrao = destinoBusca
         ? `${pergunta} em ${destinoBusca}`
         : pergunta;
-      const consultas = [...new Set([...consultasDeCategorias, ...consultasDaIa, consultaPadrao])].slice(0, 4);
+      const consultas = [...new Set([...consultasDeCategorias, ...consultasDaIa, consultaPadrao])].slice(0, 8);
       const contextoProximidade = hospedagemBase
         ? ` próximo à hospedagem ${hospedagemBase.nome}`
         : "";
@@ -1504,7 +1516,7 @@ function AssistantView({
       });
       let falhasBusca = 0;
       const resultados = await Promise.all(
-        consultasBusca.slice(0, 3).map((consulta) =>
+        consultasBusca.slice(0, 6).map((consulta) =>
           buscaTextual(consulta).catch(() => {
             falhasBusca += 1;
             return { lugares: [], fallback: false };
@@ -1539,7 +1551,7 @@ function AssistantView({
         const diasDeViagem = viagem?.dataInicio && viagem?.dataFim
           ? Math.max(1, Math.floor((new Date(`${viagem.dataFim}T12:00:00`).getTime() - new Date(`${viagem.dataInicio}T12:00:00`).getTime()) / 86400000) + 1)
           : 1;
-        const recomendacoesReais: Recomendacao[] = organizados.slice(0, 6).map((lugar, index) => {
+        const recomendacoesReais: Recomendacao[] = organizados.slice(0, 12).map((lugar, index) => {
           const estimativa = estimativaLocal(lugar);
           const origemConsulta = placesEmFallback
             ? "Opção de exemplo para manter o planejamento enquanto a cota do Google Places é recomposta."
@@ -1575,7 +1587,7 @@ function AssistantView({
               return mesmaIdentidade;
             }) === index;
           })
-          .slice(0, 8);
+          .slice(0, 12);
         respostaFinal = {
           ...respostaComOrcamento,
           texto: organizados.length
@@ -1623,7 +1635,7 @@ function AssistantView({
         const consultasFallback = consultasParaLocais(pergunta, destinoBusca);
         const resultado = await Promise.all(
           [...new Set([...consultasFallback, destinoBusca ? `${pergunta} em ${destinoBusca}` : pergunta])]
-            .slice(0, 4)
+            .slice(0, 6)
             .map((consulta) => buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }))),
         ).then((resultados) => ({ lugares: resultados.flatMap((item) => item.lugares) }));
         const pedidoHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/i.test(pergunta);
@@ -1704,36 +1716,68 @@ function AssistantView({
       onToast(normalizarErro(error).message);
     }
   }
-  function revisarLugar(lugar: Lugar, _recomendacao?: Recomendacao) {
-    // Sempre usamos o nome e o endereço exibidos ao usuário. Coordenadas
-    // antigas ou demonstrativas podem apontar para outra cidade; o Google
-    // resolve a página correta do lugar a partir desta consulta textual.
-    const consulta = encodeURIComponent([lugar.nome, lugar.endereco].filter(Boolean).join(", "));
-    const mapaUrl = `https://www.google.com/maps/search/?api=1&query=${consulta}`;
-    const metaExistente = streetViews[lugar.placeId];
-    if (metaExistente) {
-      setStreetViewSelecionado({ lugar, meta: { ...metaExistente, mapaUrl } });
+  async function resolverLugarComCoordenadas(lugar: Lugar): Promise<Lugar | null> {
+    if (Number.isFinite(lugar.lat) && Number.isFinite(lugar.lng) && !(lugar.lat === 0 && lugar.lng === 0)) return lugar;
+    const consulta = [lugar.nome, lugar.endereco].filter(Boolean).join(", ");
+    if (!consulta) return null;
+    const resultado = await buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }));
+    return resultado.lugares.find((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng) && !(item.lat === 0 && item.lng === 0)) ?? null;
+  }
+  async function visualizarLugar(lugar: Lugar, modo: "mapa" | "streetview") {
+    const lugarResolvido = await resolverLugarComCoordenadas(lugar);
+    if (!lugarResolvido) {
+      onToast("Não encontrei coordenadas confiáveis para este local. Pesquise a cidade, o país ou o endereço completo.");
       return;
     }
-    // A panorâmica é aberta no Google pelo nome e endereço. Assim o usuário
-    // não fica dependente da chave JavaScript/Street View do frontend.
-    const meta: StreetViewMeta = { status: "EXTERNAL", mapaUrl };
-    setStreetViews((atual) => ({ ...atual, [lugar.placeId]: meta }));
-    setStreetViewSelecionado({ lugar, meta });
+    setModoVisualizacao(modo);
+    const metaExistente = streetViews[lugarResolvido.placeId];
+    if (metaExistente && (modo === "mapa" || metaExistente.status !== "PENDING")) {
+      setStreetViewSelecionado({ lugar: lugarResolvido, meta: metaExistente });
+      return;
+    }
+    if (modo === "mapa") {
+      const meta: StreetViewMeta = { status: "PENDING" };
+      setStreetViews((atual) => ({ ...atual, [lugarResolvido.placeId]: meta }));
+      setStreetViewSelecionado({ lugar: lugarResolvido, meta });
+      return;
+    }
+    try {
+      const meta = await streetViewMetadata(lugarResolvido.lat, lugarResolvido.lng, 2500);
+      setStreetViews((atual) => ({ ...atual, [lugarResolvido.placeId]: meta }));
+      setStreetViewSelecionado({ lugar: lugarResolvido, meta });
+    } catch {
+      const meta: StreetViewMeta = { status: "UNAVAILABLE" };
+      setStreetViews((atual) => ({ ...atual, [lugarResolvido.placeId]: meta }));
+      setStreetViewSelecionado({ lugar: lugarResolvido, meta });
+      onToast("O Street View não retornou uma panorâmica para este ponto. O mapa continua disponível no modal.");
+    }
   }
-  function abrirStreetViewGoogle() {
-    const url = streetViewSelecionado?.meta.mapaUrl;
-    if (!url) return;
-    const janela = window.open(url, "_blank", "noopener,noreferrer");
-    if (!janela) onToast("Permita pop-ups para abrir o Google Street View.");
+  function revisarLugar(lugar: Lugar, _recomendacao?: Recomendacao) {
+    void visualizarLugar(lugar, "streetview");
   }
-  function abrirMapsGoogle() {
-    const lugar = streetViewSelecionado?.lugar;
-    if (!lugar) return;
-    const consulta = [lugar.nome, lugar.endereco].filter(Boolean).join(", ");
-    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(consulta)}`;
-    const janela = window.open(url, "_blank", "noopener,noreferrer");
-    if (!janela) onToast("Permita pop-ups para abrir o Google Maps.");
+  function abrirMapaLugar(lugar: Lugar) {
+    void visualizarLugar(lugar, "mapa");
+  }
+  function abrirMapaOferta(hotel: import("@/types").OfertaHotel) {
+    if (hotel.latitude == null || hotel.longitude == null) {
+      onToast("Esta hospedagem ainda não possui coordenadas para o mapa.");
+      return;
+    }
+    setModoVisualizacao("mapa");
+    setStreetViewSelecionado({
+      lugar: {
+        placeId: hotel.id,
+        nome: hotel.hotel,
+        endereco: hotel.endereco || viagem?.destino || "Destino da viagem",
+        categoria: "Hospedagem",
+        lat: hotel.latitude,
+        lng: hotel.longitude,
+        fonte: hotel.fonte,
+        consultadoEm: hotel.consultadoEm,
+        demonstrativo: hotel.fonte !== "Google Places",
+      },
+      meta: { status: "PENDING" },
+    });
   }
   function distanciaTexto(lugar: Lugar): string {
     const referencia = hospedagemBase ?? lugares[0];
@@ -1995,7 +2039,11 @@ function AssistantView({
                       .filter((lugar): lugar is Lugar => Boolean(lugar));
                     return lugaresDaMensagem.length ? (
                       <div className="chat-map-preview">
-                        <MapPreview lugares={lugaresDaMensagem.slice(0, 6)} />
+                        <MapPreview
+                          lugares={lugaresDaMensagem.slice(0, 6)}
+                          onVisualizarMapa={abrirMapaLugar}
+                          onVisualizarStreetView={revisarLugar}
+                        />
                       </div>
                     ) : null;
                   })() : null}
@@ -2031,6 +2079,7 @@ function AssistantView({
             acumulado={acumulado}
             onToast={onToast}
             onAdicionar={adicionarRecomendacaoControlada}
+            onVisualizarMapa={abrirMapaOferta}
           />
           <div className="side-card search-card">
             <div className="side-card-heading">
@@ -2050,7 +2099,11 @@ function AssistantView({
             </form>
             {lugares.length ? (
               <>
-                <MapPreview lugares={lugares.slice(0, 4)} />
+                <MapPreview
+                  lugares={lugares.slice(0, 4)}
+                  onVisualizarMapa={abrirMapaLugar}
+                  onVisualizarStreetView={revisarLugar}
+                />
                 <div className="place-results">
                   {lugares.slice(0, 4).map((lugar) => (
                     <div
@@ -2108,7 +2161,9 @@ function AssistantView({
                             : "Sem imagem disponível para este ponto"}
                         </small>
                       </div>
-                      {streetView.mapaUrl && <a href={streetView.mapaUrl} target="_blank" rel="noreferrer">Abrir novamente no Google Street View</a>}
+                      <button className="secondary-button compact-button" type="button" onClick={() => void revisarLugar(lugar)}>
+                        <Eye size={14} /> Ver no modal
+                      </button>
                     </div>
                   );
                 })}
@@ -2137,31 +2192,36 @@ function AssistantView({
       </div>
       {streetViewSelecionado && (
         <div className="street-view-modal-backdrop" role="presentation" onClick={() => setStreetViewSelecionado(null)}>
-          <div className="street-view-modal" role="dialog" aria-modal="true" aria-labelledby="street-view-modal-title" onClick={(event) => event.stopPropagation()}>
+          <div className="street-view-modal location-modal" role="dialog" aria-modal="true" aria-labelledby="street-view-modal-title" onClick={(event) => event.stopPropagation()}>
             <button className="street-view-modal-close" type="button" onClick={() => setStreetViewSelecionado(null)} aria-label="Fechar Street View">
               <X size={18} />
             </button>
-            <span className="section-label">Google Maps · Street View</span>
+            <span className="section-label">Visualização dentro do Locus</span>
             <h2 id="street-view-modal-title">{streetViewSelecionado.lugar.nome}</h2>
             <p>{streetViewSelecionado.lugar.endereco || "Localização consultada no Google Places"}</p>
-            {streetViewSelecionado.meta.imagemUrl && (
-              <img
-                className="street-view-modal-image"
-                src={streetViewSelecionado.meta.imagemUrl}
-                alt={`Imagem de ${streetViewSelecionado.lugar.nome}`}
+            <div className="location-modal-tabs" role="tablist" aria-label="Visualização do local">
+              <button type="button" className={modoVisualizacao === "mapa" ? "active" : ""} onClick={() => setModoVisualizacao("mapa")}><Map size={15} /> Mapa</button>
+              <button type="button" className={modoVisualizacao === "streetview" ? "active" : ""} onClick={() => setModoVisualizacao("streetview")}><Eye size={15} /> Street View</button>
+            </div>
+            {modoVisualizacao === "mapa" ? (
+              <GoogleMapCanvas lugares={[streetViewSelecionado.lugar]} />
+            ) : (
+              <GoogleStreetView
+                lat={streetViewSelecionado.lugar.lat}
+                lng={streetViewSelecionado.lugar.lng}
+                imagemUrl={streetViewSelecionado.meta.imagemUrl}
+                className="street-view-frame location-modal-view"
               />
             )}
             <div className="street-view-modal-status">
-              {streetViewSelecionado.meta.status === "EXTERNAL"
-                ? "O Google será aberto pelo nome e endereço acima. Na página correta do lugar, escolha Street View para ver a panorâmica disponível."
+              {modoVisualizacao === "mapa"
+                ? "Mapa carregado dentro da plataforma. Use os controles do próprio mapa para conferir a posição do local."
                 : streetViewSelecionado.meta.status === "OK"
-                  ? "Ponto encontrado. Abra a panorâmica real para explorar o local."
-                  : "Você pode abrir o Street View e explorar a região no Google."}
+                  ? "Panorâmica encontrada nas coordenadas do local. A visualização começa diretamente no ponto turístico ou na posição pública mais próxima."
+                  : "Não há panorâmica pública disponível exatamente neste ponto. O mapa continua disponível para conferir a localização."}
             </div>
             <div className="street-view-modal-actions">
               <button type="button" className="secondary-button" onClick={() => setStreetViewSelecionado(null)}>Fechar</button>
-              <button type="button" className="secondary-button" onClick={abrirMapsGoogle}>Abrir no Google Maps <Map size={15} /></button>
-              <button type="button" className="primary-button" onClick={abrirStreetViewGoogle}>Abrir no Google Street View <ArrowRight size={16} /></button>
             </div>
           </div>
         </div>
@@ -2248,8 +2308,11 @@ function ProfileView({
                     <FileText size={18} />
                   </span>
                   <div>
-                    <strong>{relatorio.protocolo || `Relatório ${relatorio.id}`}</strong>
+                    <strong>
+                      {(relatorio.nomeArquivo || `Relatório ${relatorio.id}`).replace(/\.pdf$/i, "")}
+                    </strong>
                     <small>
+                      {relatorio.protocolo ? `Protocolo ${relatorio.protocolo} · ` : ""}
                       Gerado em{" "}
                       {new Date(
                         relatorio.geradoEm || String(campo(relatorio, "dataGeracao") ?? ""),

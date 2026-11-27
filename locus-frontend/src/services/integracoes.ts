@@ -545,7 +545,7 @@ export async function perguntarGemini(
         contexto.orcamentoDetalhado ? `Resumo por categoria: ${contexto.orcamentoDetalhado}. Ajude a pessoa a definir e revisar os valores de passagem, hospedagem, visitas, alimentação, transporte local e extras.` : "",
       ].filter(Boolean).join(" ")
     : "";
-  const regras = "Não repita saudações nem perguntas já respondidas. Recomende somente locais dentro do destino obrigatório; para locais nomeados, gere consultas ao Google Places e deixe a confirmação dos dados para a busca real. Quando houver hospedagem-base, priorize locais em até 20 km dela e informe que o sistema vai conferir a distância e a rota. Quando a pessoa perguntar sobre orçamento, mostre o total, o acumulado e uma sugestão separada por categoria. Nunca ultrapasse o limite fixo; em orçamento aberto, some cada escolha e explique o valor estimado que ainda falta para alimentação, transporte local e extras.";
+  const regras = "Não repita saudações nem perguntas já respondidas. Recomende somente locais dentro do destino obrigatório; para locais nomeados, gere consultas ao Google Places e deixe a confirmação dos dados para a busca real. Quando o destino tiver vários locais separados por ponto e vírgula ou barra vertical, cubra cada cidade, estado ou país separadamente. Se a pessoa informar apenas país ou estado e pedir locais próximos sem indicar cidade ou região, pergunte qual cidade ou região deve ser considerada antes de confirmar pontos próximos. Quando houver hospedagem-base, priorize locais em até 20 km dela e informe que o sistema vai conferir a distância e a rota. Quando a pessoa perguntar sobre orçamento, mostre o total, o acumulado e uma sugestão separada por categoria. Nunca ultrapasse o limite fixo; em orçamento aberto, some cada escolha e explique o valor estimado que ainda falta para alimentação, transporte local e extras.";
   const promptCompleto = [financeiro, viagem, regras, historicoTexto, `Usuário: ${textoPergunta}`]
     .filter(Boolean)
     .join("\n\n");
@@ -715,7 +715,6 @@ export interface StreetViewMeta {
   status: string;
   imagemUrl?: string;
   embedUrl?: string;
-  mapaUrl?: string;
   data?: string;
 }
 
@@ -741,7 +740,6 @@ export async function streetViewMetadata(lat: number, lng: number, radius = 150)
   return {
     ...resultado,
     ...(imagemUrl ? { imagemUrl } : {}),
-    mapaUrl: `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`,
   };
 }
 
@@ -784,7 +782,7 @@ function normalizarVoo(raw: unknown, passageirosPadrao = 1): OfertaVoo {
 export async function buscarVoos(params: Record<string, string | number>): Promise<OfertaVoo[]> {
   const raw = await chamar<Json>(() => api.get(`${BASE}/ofertas/voos`, { params }));
   const passageiros = Math.max(1, Number(params["adults"] ?? 1));
-  return (Array.isArray(raw.data) ? raw.data : []).map((item) => normalizarVoo(item, passageiros));
+  return (Array.isArray(raw.data) ? raw.data : []).map((item: Json) => normalizarVoo(item, passageiros));
 }
 
 export async function buscarLocalizacoes(keyword: string): Promise<{ iataCode: string; nome: string }[]> {

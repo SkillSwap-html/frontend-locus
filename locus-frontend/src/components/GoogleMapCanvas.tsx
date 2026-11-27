@@ -21,7 +21,7 @@ export function GoogleMapCanvas({ lugares }: { lugares: Lugar[] }) {
           center: { lat: pontos[0]!.lat, lng: pontos[0]!.lng },
           zoom: pontos.length === 1 ? 15 : 12,
           mapTypeControl: true,
-          streetViewControl: true,
+          streetViewControl: false,
           fullscreenControl: true,
         });
         const limites = new google.maps.LatLngBounds();
@@ -48,12 +48,6 @@ export function GoogleMapCanvas({ lugares }: { lugares: Lugar[] }) {
     <div className="map-preview" aria-label="Google Maps dos lugares encontrados">
       <div ref={elementRef} className="map-preview-frame" />
       {erro && <div className="map-preview-error">{erro}</div>}
-      <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${pontos[0]!.lat},${pontos[0]!.lng}`)}`} target="_blank" rel="noreferrer">
-        Abrir no Google Maps
-      </a>
-      <a href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${pontos[0]!.lat},${pontos[0]!.lng}`} target="_blank" rel="noreferrer">
-        Abrir no Google Street View
-      </a>
     </div>
   );
 }

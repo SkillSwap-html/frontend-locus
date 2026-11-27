@@ -82,7 +82,7 @@ export async function adicionarRecomendacao(
       });
     const horarioSolicitado = recomendacao.horario
       ? (() => {
-          const [hora, minuto] = recomendacao.horario!.split(":").map(Number);
+          const [hora = 0, minuto = 0] = recomendacao.horario!.split(":").map(Number);
           return Number.isFinite(hora) && Number.isFinite(minuto) ? hora * 60 + minuto : undefined;
         })()
       : undefined;
@@ -111,18 +111,38 @@ export async function adicionarRecomendacao(
       ),
     );
   }
-  if (possuiValor) {
-    await chamar(() =>
-      api.post(
+  if (possuiValor || (!ehOferta && recomendacao.categoria)) {
+    await chamar(() => api.post(
+      `/api/itens-orcamento/viagem/${viagemId}`,
+      {
+        categoria: categoriaBackend(recomendacao.categoria),
+        descricao: recomendacao.titulo,
+        valor: Math.max(0, valor),
+      },
+      { params: { usuarioSolicitanteId: usuarioId } },
+    ));
+  }
+
+  const ehAtividadeTuristica = !ehOferta && (recomendacao.tipo === "lugar" || recomendacao.tipo === "atividade");
+  if (ehAtividadeTuristica) {
+    // O Places confirma o local, mas não fornece automaticamente o custo de
+    // uma refeição nem o deslocamento do viajante. O Locus registra essas duas
+    // parcelas separadamente como estimativas, para que o resumo e o PDF não
+    // fiquem zerados e para que cada atração tenha seu próprio custo.
+    const alimentacao = recomendacao.categoria === "alimentacao" ? 0 : 60;
+    const transporteLocal = recomendacao.categoria === "transporteLocal" ? 0 : 35;
+    const estimativas = [
+      { categoria: "ALIMENTACAO", descricao: `${recomendacao.titulo} - alimentação estimada`, valor: alimentacao },
+      { categoria: "TRANSPORTE_LOCAL", descricao: `${recomendacao.titulo} - transporte local estimado`, valor: transporteLocal },
+    ];
+    for (const estimativa of estimativas) {
+      if (estimativa.valor <= 0) continue;
+      await chamar(() => api.post(
         `/api/itens-orcamento/viagem/${viagemId}`,
-        {
-          categoria: categoriaBackend(recomendacao.categoria),
-          descricao: recomendacao.titulo,
-          valor,
-        },
+        estimativa,
         { params: { usuarioSolicitanteId: usuarioId } },
-      ),
-    );
+      ));
+    }
   }
   return obterViagem(viagemId);
 }
