@@ -40,7 +40,6 @@ import {
   calcularRota,
   perguntarGemini,
   respostaLocalAssistente,
-  streetViewMetadata,
   type StreetViewMeta,
   type Trecho,
 } from "@/services/integracoes";
@@ -51,7 +50,7 @@ import { adicionarRecomendacao, compararVersoes, criarLinkCompartilhamento, cria
 import { limparUsuarioBackend, sincronizarUsuario } from "@/services/usuarioBackend";
 import { criarViagem, definirLimitesOrcamento, listarNotificacoes, listarViagens, marcarLida, marcarTodasComoLidas, obterViagem } from "@/services/viagens";
 import { MapPreview } from "@/components/MapPreview";
-import { GoogleMapCanvas } from "@/components/GoogleMapCanvas";
+import { GoogleEmbedMap } from "@/components/GoogleEmbedMap";
 import { GoogleStreetView } from "@/components/GoogleStreetView";
 import { AdminView } from "@/components/AdminView";
 import { PlanningFlow } from "@/components/PlanningFlow";
@@ -1829,16 +1828,12 @@ function AssistantView({
       setStreetViewSelecionado({ lugar: lugarResolvido, meta });
       return;
     }
-    try {
-      const meta = await streetViewMetadata(lugarResolvido.lat, lugarResolvido.lng, 2500);
-      setStreetViews((atual) => ({ ...atual, [lugarResolvido.placeId]: meta }));
-      setStreetViewSelecionado({ lugar: lugarResolvido, meta });
-    } catch {
-      const meta: StreetViewMeta = { status: "UNAVAILABLE" };
-      setStreetViews((atual) => ({ ...atual, [lugarResolvido.placeId]: meta }));
-      setStreetViewSelecionado({ lugar: lugarResolvido, meta });
-      onToast("O Street View não retornou uma panorâmica para este ponto. O mapa continua disponível no modal.");
-    }
+    // O modal usa a Maps Embed API diretamente. O Google escolhe a
+    // panorâmica mais próxima a partir das coordenadas, sem consultar a API
+    // Street View no backend e sem abrir uma nova aba.
+    const meta: StreetViewMeta = { status: "READY" };
+    setStreetViews((atual) => ({ ...atual, [lugarResolvido.placeId]: meta }));
+    setStreetViewSelecionado({ lugar: lugarResolvido, meta });
   }
   function revisarLugar(lugar: Lugar, _recomendacao?: Recomendacao) {
     void visualizarLugar(lugar, "streetview");
@@ -2323,7 +2318,12 @@ function AssistantView({
               <button type="button" className={modoVisualizacao === "streetview" ? "active" : ""} onClick={() => setModoVisualizacao("streetview")}><Eye size={15} /> Street View</button>
             </div>
             {modoVisualizacao === "mapa" ? (
-              <GoogleMapCanvas lugares={[streetViewSelecionado.lugar]} />
+              <GoogleEmbedMap
+                nome={streetViewSelecionado.lugar.nome}
+                endereco={streetViewSelecionado.lugar.endereco}
+                lat={streetViewSelecionado.lugar.lat}
+                lng={streetViewSelecionado.lugar.lng}
+              />
             ) : (
               <GoogleStreetView
                 lat={streetViewSelecionado.lugar.lat}
