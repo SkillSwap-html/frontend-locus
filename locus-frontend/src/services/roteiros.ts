@@ -131,11 +131,11 @@ export async function adicionarRecomendacao(
     // fiquem zerados e para que cada atração tenha seu próprio custo.
     const alimentacao = recomendacao.categoria === "alimentacao"
       ? 0
-      : Math.max(0, Number(recomendacao.custos?.alimentacao?.valorBrl ?? 110));
+      : Math.max(0, Number(recomendacao.custos?.alimentacao?.valorBrl ?? 60));
     const transporteLocal = recomendacao.categoria === "transporteLocal"
       ? 0
-      : Math.max(0, Number(recomendacao.custos?.transporteLocal?.valorBrl ?? 48));
-    const extras = Math.max(0, Number(recomendacao.custos?.extras?.valorBrl ?? 30));
+      : Math.max(0, Number(recomendacao.custos?.transporteLocal?.valorBrl ?? 35));
+    const extras = Math.max(0, Number(recomendacao.custos?.extras?.valorBrl ?? 20));
     const estimativas = [
       { categoria: "ALIMENTACAO", descricao: `${recomendacao.titulo} - alimentação estimada`, valor: alimentacao },
       { categoria: "TRANSPORTE_LOCAL", descricao: `${recomendacao.titulo} - transporte local estimado`, valor: transporteLocal },
