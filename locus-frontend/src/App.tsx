@@ -38,6 +38,7 @@ import {
   autocomplete,
   buscaTextual,
   calcularRota,
+  parecePlaceIdGoogle,
   perguntarGemini,
   respostaLocalAssistente,
   type StreetViewMeta,
@@ -238,6 +239,17 @@ function estimativaLocal(lugar: Lugar): { categoria: CategoriaOrcamento; valor: 
   }
   return { categoria: "visitas", valor: 30, rotulo: "estimativa de visita" };
 }
+
+function separarDestinosInformados(valor: string): string[] {
+  const texto = valor.trim();
+  if (!texto) return [];
+  const partes = texto
+    .split(/\s*(?:;|\||\/|\r?\n)\s*/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 2);
+  return [...new Set((partes.length ? partes : [texto]).map((item) => item.trim()))];
+}
+
 function consultasParaLocais(pergunta: string, destino: string): string[] {
   if (!destino) return [];
   const normalizada = pergunta.toLowerCase();
@@ -247,10 +259,7 @@ function consultasParaLocais(pergunta: string, destino: string): string[] {
   const pedeRestaurante = /restaurante|restaurantes|comida|gastronomia|jantar|almoço|almoco|café|cafe/.test(normalizada);
   const pedeAtracao = /ponto|turíst|turist|museu|parque|atraç|visitar|roteiro|lugar|lugares|passeio/.test(normalizada);
   if (pedePassagem && !pedeHospedagem && !pedeAtracao && !pedePraia && !pedeRestaurante) return [];
-  const destinos = destino
-    .split(/\s*[;|]\s*/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const destinos = separarDestinosInformados(destino);
   const consultas: string[] = [];
   for (const local of destinos) {
     if (pedeHospedagem) consultas.push(`hotéis, pousadas e hospedagens reais em ${local}`);
@@ -267,7 +276,8 @@ function consultasParaLocais(pergunta: string, destino: string): string[] {
       if (!pedeRestaurante) consultas.push(`restaurantes e gastronomia local em ${local}`);
     }
   }
-  return [...new Set(consultas)].slice(0, 8);
+  const limite = Math.max(8, destinos.length * 3);
+  return [...new Set(consultas)].slice(0, limite);
 }
 function formatarTransporte(value: string): string {
   return (
@@ -1555,27 +1565,49 @@ function AssistantView({
       // mensagem, mas não podem bloquear a conversa enquanto são consultados.
       setMensagens((atuais) => atuais.map((item) => item.id === idResposta ? { ...respostaComOrcamento, id: idResposta } : item));
       const destinoBusca = destinoAtual;
+      const destinosBusca = separarDestinosInformados(destinoBusca);
       const consultasDaIa = (resposta.consultas ?? [])
         .map((consulta) => consulta.trim())
         .filter((consulta) => consulta.length > 4)
         .filter((consulta) => !/consultas?\s+(curtas|abaixo)|obter mais detalhes|google places$/i.test(consulta));
-      const consultasDeCategorias = consultasParaLocais(pergunta, destinoBusca);
-      const consultaPadrao = destinoBusca
-        ? `${pergunta} em ${destinoBusca}`
-        : pergunta;
-      const consultas = [...new Set([...consultasDeCategorias, ...consultasDaIa, consultaPadrao])].slice(0, 8);
+      const consultasDeCategorias = destinosBusca.flatMap((destino) => consultasParaLocais(pergunta, destino));
+      const consultasDaIaPorDestino = destinosBusca.length
+        ? consultasDaIa.flatMap((consulta) => {
+            const consultaNormalizada = normalizarTextoLocal(consulta);
+            const jaIndicaDestino = destinosBusca.some((destino) =>
+              consultaNormalizada.includes(normalizarTextoLocal(destino)),
+            );
+            return jaIndicaDestino
+              ? [consulta]
+              : destinosBusca.map((destino) => `${consulta} em ${destino}`);
+          })
+        : consultasDaIa;
+      const consultasPadrao = destinosBusca.length
+        ? destinosBusca.map((destino) => `${pergunta} em ${destino}`)
+        : [pergunta];
+      const consultas = [...new Set([
+        ...consultasDeCategorias,
+        ...consultasDaIaPorDestino,
+        ...consultasPadrao,
+      ])];
       const contextoProximidade = hospedagemBase
         ? ` próximo à hospedagem ${hospedagemBase.nome}`
         : "";
       const consultasBusca = consultas.map((consulta) => {
         const consultaComBase = `${consulta}${contextoProximidade}`;
-        return destinoBusca && !consultaComBase.toLowerCase().includes(destinoBusca.toLowerCase())
+        const consultaTemDestino = destinosBusca.some((destino) =>
+          normalizarTextoLocal(consultaComBase).includes(normalizarTextoLocal(destino)),
+        );
+        return destinoBusca && !consultaTemDestino
           ? `${consultaComBase} em ${destinoBusca}`
           : consultaComBase;
       });
+      const limiteConsultasPlaces = destinosBusca.length
+        ? Math.max(4, destinosBusca.length * 3)
+        : 4;
       let falhasBusca = 0;
       const resultados = await Promise.all(
-        consultasBusca.slice(0, 4).map((consulta) =>
+        consultasBusca.slice(0, limiteConsultasPlaces).map((consulta) =>
           buscaTextual(consulta).catch(() => {
             falhasBusca += 1;
             return { lugares: [], fallback: false };
@@ -1744,10 +1776,14 @@ function AssistantView({
         fallback.orcamentoCambio = TAXAS_CAMBIO_REFERENCIA[moeda];
       }
       try {
-        const consultasFallback = consultasParaLocais(pergunta, destinoBusca);
+        const destinosFallback = separarDestinosInformados(destinoBusca);
+        const consultasFallback = destinosFallback.flatMap((destino) => consultasParaLocais(pergunta, destino));
+        const consultasPadraoFallback = destinosFallback.length
+          ? destinosFallback.map((destino) => `${pergunta} em ${destino}`)
+          : [pergunta];
         const resultado = await Promise.all(
-          [...new Set([...consultasFallback, destinoBusca ? `${pergunta} em ${destinoBusca}` : pergunta])]
-            .slice(0, 6)
+          [...new Set([...consultasFallback, ...consultasPadraoFallback])]
+            .slice(0, Math.max(6, destinosFallback.length * 3))
             .map((consulta) => buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }))),
         ).then((resultados) => ({
           lugares: resultados
@@ -1840,7 +1876,7 @@ function AssistantView({
     }
   }
   async function resolverLugarComCoordenadas(lugar: Lugar): Promise<Lugar | null> {
-    if (Boolean(lugar.placeId
+    if (lugar.fonte === "Google Places" && parecePlaceIdGoogle(lugar.placeId) && Boolean(lugar.placeId
       && lugar.endereco?.trim()
       && Number.isFinite(lugar.lat)
       && Number.isFinite(lugar.lng)
