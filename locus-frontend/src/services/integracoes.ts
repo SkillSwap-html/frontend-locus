@@ -221,6 +221,8 @@ function hospedagensExemplo(params: Record<string, string | number>): OfertaHote
     moeda: "BRL",
     taxas: 0,
     preco: diaria * noites * quartos,
+    precoDiaria: diaria,
+    precoEstimado: true,
     imagemUrl: IMAGENS_HOSPEDAGEM_EXEMPLO[index]!,
     latitude: destino.lat + (index - 1) * 0.008,
     longitude: destino.lng + (index - 1) * 0.009,
@@ -785,22 +787,26 @@ function normalizarVoo(raw: unknown, passageirosPadrao = 1): OfertaVoo {
   const returnDeparture = objeto(objeto(returnSegments[0]).departure);
   const departure = objeto(first.departure);
   const arrival = objeto(last.arrival);
+  const codigoCompanhia = Array.isArray(value.validatingAirlineCodes)
+    ? texto(value.validatingAirlineCodes[0])
+    : "";
+  const total = numero(price.total);
+  const tarifaBase = numero(price.base, total);
   return {
     id: texto(value.id),
-    companhia:
-      (Array.isArray(value.validatingAirlineCodes) ? texto(value.validatingAirlineCodes[0]) : "") ||
-      "Companhia aérea",
+    companhia: texto(value.airlineName) || codigoCompanhia || "Companhia aérea",
     origem: texto(departure.iataCode),
     destino: texto(arrival.iataCode),
     ida: texto(departure.at),
     volta: texto(returnDeparture.at),
     passageiros: Math.max(1, numero(value.travelerCount) || passageirosPadrao),
-    ...(value.roundTrip === true ? { idaEVolta: true } : {}),
+    ...(value.roundTrip === true || itineraries.length > 1 ? { idaEVolta: true } : { idaEVolta: false }),
     classe: "Econômica",
     bagagem: "Consultar oferta",
     moeda: texto(price.currency) || "BRL",
-    taxas: numero(price.total) - numero(price.base),
-    preco: numero(price.total),
+    tarifaBase,
+    taxas: Math.max(0, total - tarifaBase),
+    preco: total,
     fonte: value.simulated === true ? "Locus" : "Provedor configurado",
     consultadoEm: new Date().toISOString(),
     historico: [],
@@ -865,9 +871,13 @@ export async function buscarHoteis(
         });
         imagemUrl = URL.createObjectURL(imagem.data);
       } catch {
-        // A foto é opcional; o hotel real continua aparecendo com nome e endereço.
+        // A foto oficial é opcional; usamos uma imagem de apoio para que a
+        // oferta continue visualmente completa.
       }
     }
+    const diarias = diariasHospedagemExemplo(cidade);
+    const precoDiaria = diarias[Math.min(index, diarias.length - 1)]!;
+    const preco = noites > 0 ? precoDiaria * noites * quartos : 0;
     return {
       id: texto(value.id) || `hotel-${index}`,
       hotel: texto(displayName.text) || "Hospedagem encontrada no Google",
@@ -881,10 +891,13 @@ export async function buscarHoteis(
       politica: "Consultar oferta",
       moeda: "BRL",
       taxas: 0,
-      // O Places confirma o estabelecimento, mas não fornece tarifa para as datas.
-      // Não inventamos preço: a tela mostra “Consultar”.
-      preco: 0,
-      ...(imagemUrl ? { imagemUrl } : {}),
+      // O Places confirma o estabelecimento, mas não fornece tarifa para as
+      // datas. O valor abaixo é uma estimativa transparente para permitir a
+      // montagem do roteiro; não é uma promessa de disponibilidade.
+      preco,
+      precoDiaria,
+      precoEstimado: true,
+      imagemUrl: imagemUrl || IMAGENS_HOSPEDAGEM_EXEMPLO[index % IMAGENS_HOSPEDAGEM_EXEMPLO.length]!,
       latitude: numero(location.latitude),
       longitude: numero(location.longitude),
       endereco: texto(value.formattedAddress) || texto(value.shortFormattedAddress),

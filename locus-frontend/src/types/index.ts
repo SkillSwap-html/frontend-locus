@@ -153,6 +153,7 @@ export interface OfertaVoo {
   classe: string;
   bagagem: string;
   moeda: string;
+  tarifaBase?: number;
   taxas: number;
   preco: number;
   fonte: string;
@@ -175,6 +176,8 @@ export interface OfertaHotel {
   moeda: string;
   taxas: number;
   preco: number;
+  precoDiaria?: number;
+  precoEstimado?: boolean;
   imagemUrl?: string;
   latitude?: number;
   longitude?: number;
