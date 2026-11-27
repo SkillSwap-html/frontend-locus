@@ -1654,7 +1654,7 @@ function AssistantView({
           const custoPrincipal = estimativas.custos[estimativa.categoria];
           const origemConsulta = placesEmFallback
             ? "Opção de exemplo para manter o planejamento enquanto a cota do Google Places é recomposta."
-            : "Encontrado no Google Places; confira o Street View antes de adicionar.";
+            : "Encontrado no Google Places.";
           return {
           id: `lugar-${lugar.placeId}`,
           placeId: lugar.placeId,
