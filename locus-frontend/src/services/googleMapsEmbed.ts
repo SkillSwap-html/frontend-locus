@@ -13,7 +13,7 @@ export function chaveGoogleMapsEmbed(): string {
 }
 
 export function urlGoogleMapsEmbed(
-  modo: "place" | "view" | "streetview",
+  modo: "place" | "streetview",
   parametros: Record<string, string>,
 ): string {
   const chave = chaveGoogleMapsEmbed();

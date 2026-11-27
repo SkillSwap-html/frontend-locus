@@ -125,37 +125,6 @@ function destinoParaExemplo(consulta: string): CoordenadaDestino {
   };
 }
 
-function lugaresDemonstrativos(consulta: string): Lugar[] {
-  const destino = destinoParaExemplo(consulta);
-  const textoConsulta = normalizarBusca(consulta);
-  const querHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/.test(textoConsulta);
-  const nomes = querHospedagem
-    ? ["Hospedagem central", "Pousada próxima à praia", "Hotel confortável no destino", "Hostel bem localizado"]
-    : ["Praia ou atração natural próxima", "Ponto turístico do centro", "Restaurante recomendado na região", "Museu ou atração cultural"];
-  const categorias = querHospedagem
-    ? ["Hotel", "Pousada", "Hotel", "Hostel"]
-    : ["Praia", "Ponto turístico", "Restaurante", "Museu"];
-  const possuiCoordenadas = destino.lat !== 0 || destino.lng !== 0;
-  const agora = new Date().toISOString();
-  return nomes.map((nome, index) => ({
-    placeId: `demo-${normalizarBusca(destino.nome).replace(/[^a-z0-9]+/g, "-")}-${index}`,
-    nome: `${nome} em ${destino.nome}`,
-    endereco: possuiCoordenadas
-      ? `${destino.nome} · localização de exemplo para planejamento`
-      : `${destino.nome} · confirme a localização no Google Maps`,
-    categoria: categorias[index]!,
-    // Quando o destino não foi geocodificado, não invente coordenadas perto
-    // de 0,0: isso abre o mapa no oceano e deixa o Street View sem panorama.
-    lat: possuiCoordenadas ? destino.lat + (index - 1.5) * 0.012 : Number.NaN,
-    lng: possuiCoordenadas
-      ? destino.lng + (index % 2 === 0 ? 1 : -1) * (0.014 + index * 0.003)
-      : Number.NaN,
-    fonte: "Exemplo de planejamento · Google Places temporariamente limitado",
-    consultadoEm: agora,
-    demonstrativo: true,
-  }));
-}
-
 function sugestoesLocaisFallback(valor: string): { id: string; texto: string }[] {
   const consulta = normalizarBusca(valor);
   const conhecidas = SUGESTOES_LOCAIS
@@ -633,7 +602,7 @@ export async function buscaTextual(q: string): Promise<ResultadoBusca> {
   const cacheado = cacheBusca.get(chave);
   if (cacheado && cacheado.expiraEm > Date.now()) return cacheado.resultado;
   if (placesIndisponivelAte > Date.now()) {
-    const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
+    const resultado = { lugares: [], fallback: true };
     cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   }
@@ -644,13 +613,13 @@ export async function buscaTextual(q: string): Promise<ResultadoBusca> {
     const places = Array.isArray(raw.places) ? raw.places : [];
     const resultado = places.length
       ? { lugares: places.map(normalizarLugar), fallback: false }
-      : { lugares: lugaresDemonstrativos(q), fallback: true };
+      : { lugares: [], fallback: true };
     cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   } catch (error) {
-    if (placesFoiLimitado(error) || error instanceof LocusError) {
+    if (placesFoiLimitado(error)) {
       placesIndisponivelAte = Date.now() + CACHE_PLACES_MS;
-      const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
+      const resultado = { lugares: [], fallback: true };
       cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
       return resultado;
     }

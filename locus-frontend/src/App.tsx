@@ -308,7 +308,7 @@ function rotuloCategoria(value: CategoriaOrcamento): string {
   return CATEGORIAS.find((item) => item.id === value)?.rotulo ?? value;
 }
 function estrelasAvaliacao(avaliacao?: number): string {
-  if (avaliacao == null || !Number.isFinite(avaliacao)) return "☆☆☆☆☆ · sem avaliação";
+  if (avaliacao == null || !Number.isFinite(avaliacao)) return "";
   const preenchidas = Math.max(0, Math.min(5, Math.round(avaliacao)));
   return `${"★".repeat(preenchidas)}${"☆".repeat(5 - preenchidas)} ${avaliacao.toFixed(1)}`;
 }
@@ -1607,8 +1607,16 @@ function AssistantView({
           }),
         ),
       );
-      const encontrados = resultados.flatMap((item) => item.lugares);
-      const placesEmFallback = resultados.some((item) => item.fallback);
+      // Cartões do planejamento só podem nascer de resultados reais do
+      // Places. O fallback local não possui endereço, nota ou coordenadas
+      // confiáveis e não deve ser usado para abrir mapa ou Street View.
+      const encontrados = resultados
+        .filter((item) => !item.fallback)
+        .flatMap((item) => item.lugares)
+        .filter((lugar) => lugar.endereco.trim()
+          && Number.isFinite(lugar.lat)
+          && Number.isFinite(lugar.lng));
+      const placesEmFallback = resultados.length > 0 && resultados.every((item) => item.fallback);
       let respostaFinal = respostaComOrcamento;
       if (encontrados.length) {
         const unicos = [...new globalThis.Map(encontrados.map((item) => [item.placeId, item])).values()];
@@ -1678,7 +1686,8 @@ function AssistantView({
           dia: Math.min(diasDeViagem, Math.floor(index / 3) + 1),
           };
         });
-        const recomendacoesDaIa = respostaComOrcamento.recomendacoes ?? [];
+        const recomendacoesDaIa = (respostaComOrcamento.recomendacoes ?? [])
+          .filter((recomendacao) => Boolean(recomendacao.endereco?.trim()));
         const recomendacoesDaIaComCustos = recomendacoesDaIa.map((recomendacao) => {
           const lugar = lugarDaRecomendacao(recomendacao);
           if (!lugar) return recomendacao;
@@ -1709,14 +1718,16 @@ function AssistantView({
       } else {
         setLugares([]);
         setRota([]);
-        const recomendacoesDaIaComCustos = respostaComOrcamento.recomendacoes?.map((recomendacao) => {
+        const recomendacoesDaIaComCustos = respostaComOrcamento.recomendacoes
+          ?.filter((recomendacao) => Boolean(recomendacao.endereco?.trim()))
+          .map((recomendacao) => {
           const lugar = lugarDaRecomendacao(recomendacao);
           if (!lugar) return recomendacao;
           return {
             ...recomendacao,
             custos: recomendacao.custos ?? estimativasDoLocal(lugar, destinoBusca).custos,
           };
-        });
+          });
         const possuiRecomendacoesDaIa = Boolean(recomendacoesDaIaComCustos?.length);
         respostaFinal = {
           ...respostaComOrcamento,
@@ -1817,9 +1828,14 @@ function AssistantView({
     try {
       const destinoBusca = viagem?.destino || preferencias?.destino || "";
       const resultado = await buscaTextual(destinoBusca ? `${busca} em ${destinoBusca}` : busca);
+      const lugaresReais = resultado.fallback
+        ? []
+        : resultado.lugares.filter((lugar) => lugar.endereco.trim()
+          && Number.isFinite(lugar.lat)
+          && Number.isFinite(lugar.lng));
       const proximos = hospedagemBase
-        ? resultado.lugares.filter((lugar) => distanciaKm(hospedagemBase, lugar) <= 20)
-        : resultado.lugares;
+        ? lugaresReais.filter((lugar) => distanciaKm(hospedagemBase, lugar) <= 20)
+        : lugaresReais;
       const organizados = ordenarLugares(proximos, hospedagemBase ?? undefined);
       setLugares(organizados);
       if (!organizados.length) {
@@ -2091,14 +2107,11 @@ function AssistantView({
                     <div className="recommendation" key={recomendacao.id}>
                       <div>
                         <strong>{recomendacao.titulo}</strong>
-                        <span
-                          className="recommendation-rating"
-                          aria-label={recomendacao.avaliacao != null
-                            ? `Avaliação ${recomendacao.avaliacao.toFixed(1)} de 5`
-                            : "Avaliação não informada"}
-                        >
-                          {estrelasAvaliacao(recomendacao.avaliacao)}
-                        </span>
+                        {recomendacao.avaliacao != null && (
+                          <span className="recommendation-rating" aria-label={`Avaliação ${recomendacao.avaliacao.toFixed(1)} de 5`}>
+                            {estrelasAvaliacao(recomendacao.avaliacao)}
+                          </span>
+                        )}
                         <span>{recomendacao.resumo}</span>
                         <small className="recommendation-address">
                           {recomendacao.endereco
@@ -2273,7 +2286,7 @@ function AssistantView({
                       <span>
                         <strong>{lugar.nome}</strong>
                         <small>
-                          {lugar.categoria} · {estrelasAvaliacao(lugar.avaliacao)} · {distanciaTexto(lugar)}
+                          {lugar.categoria}{lugar.avaliacao ? ` · ★ ${lugar.avaliacao.toFixed(1)}` : ""} · {distanciaTexto(lugar)}
                         </small>
                       </span>
                       <div className="place-actions">
@@ -2369,8 +2382,6 @@ function AssistantView({
               />
             ) : (
               <GoogleStreetView
-                nome={streetViewSelecionado.lugar.nome}
-                endereco={streetViewSelecionado.lugar.endereco}
                 lat={streetViewSelecionado.lugar.lat}
                 lng={streetViewSelecionado.lugar.lng}
                 imagemUrl={streetViewSelecionado.meta.imagemUrl}
