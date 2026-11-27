@@ -378,12 +378,16 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
   return raw.map((item: Json, index) => {
     const value = objeto(item);
     const evidencia = objeto(value.evidencia);
+    const location = objeto(value.location);
     const categoria = texto(value.categoria) as NonNullable<MensagemAssistente["recomendacoes"]>[number]["categoria"];
     const natureza = texto(value.natureza) as NonNullable<MensagemAssistente["recomendacoes"]>[number]["natureza"];
+    const placeId = texto(value.placeId) || texto(value.idGoogle) || texto(value.googlePlaceId);
+    const latitude = Number(value.lat ?? value.latitude ?? location.latitude);
+    const longitude = Number(value.lng ?? value.longitude ?? location.longitude);
     return {
       id: texto(value.id) || `recomendacao-${Date.now()}-${index}`,
       tipo: (texto(value.tipo) || "lugar") as NonNullable<MensagemAssistente["recomendacoes"]>[number]["tipo"],
-      titulo: texto(value.titulo) || "Sugestão de viagem",
+      titulo: texto(value.titulo) || texto(value.nome) || texto(value.name) || "Sugestão de viagem",
       resumo: texto(value.resumo) || "Confira esta possibilidade antes de adicionar ao roteiro.",
       justificativa: texto(value.justificativa) || "Combina com o contexto informado.",
       evidencia: {
@@ -391,8 +395,11 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
         consultadoEm: texto(evidencia.consultadoEm) || new Date().toISOString(),
       },
       ...(texto(value.consulta) ? { consulta: texto(value.consulta) } : {}),
+      ...(placeId ? { placeId } : {}),
       ...(Number.isFinite(Number(value.avaliacao ?? value.rating ?? value.nota)) ? { avaliacao: Number(value.avaliacao ?? value.rating ?? value.nota) } : {}),
-      ...(texto(value.endereco) ? { endereco: texto(value.endereco) } : {}),
+      ...(texto(value.endereco) || texto(value.formattedAddress) ? { endereco: texto(value.endereco) || texto(value.formattedAddress) } : {}),
+      ...(Number.isFinite(latitude) && latitude !== 0 ? { lat: latitude } : {}),
+      ...(Number.isFinite(longitude) && longitude !== 0 ? { lng: longitude } : {}),
       ...(texto(value.categoriaLocal) ? { categoriaLocal: texto(value.categoriaLocal) } : {}),
       ...(Number.isInteger(Number(value.dia)) ? { dia: Number(value.dia) } : {}),
       ...(texto(value.horario) ? { horario: texto(value.horario) } : {}),
