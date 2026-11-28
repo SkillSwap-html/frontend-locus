@@ -250,6 +250,11 @@ function separarDestinosInformados(valor: string): string[] {
   return [...new Set((partes.length ? partes : [texto]).map((item) => item.trim()))];
 }
 
+function destinoInferidoDaPergunta(pergunta: string): string {
+  const correspondencia = pergunta.match(/\b(?:roteiro|viagem|viajar|viajem|passeio)\s+(?:para|em|no|na)\s+(.+?)(?:[.!?]|$)/i);
+  return correspondencia?.[1]?.trim().replace(/[,.]+$/, "") || "";
+}
+
 function consultasParaLocais(pergunta: string, destino: string): string[] {
   if (!destino) return [];
   const normalizada = pergunta.toLowerCase();
@@ -1529,6 +1534,8 @@ function AssistantView({
     }]);
     setEnviando(true);
     try {
+      const destinoDoContexto = viagem?.destino || preferencias?.destino || "";
+      const destinoInferido = destinoDoContexto || destinoInferidoDaPergunta(pergunta);
       const resposta = await perguntarGemini([...mensagens, user], pergunta, {
         modoOrcamento,
         limite,
@@ -1536,7 +1543,7 @@ function AssistantView({
         orcamentoDetalhado,
         idade: preferencias?.idade,
         origem: viagem?.origem || preferencias?.origem,
-        destino: viagem?.destino,
+        destino: destinoInferido || undefined,
         dataInicio: viagem?.dataInicio || preferencias?.dataInicio,
         dataFim: viagem?.dataFim || preferencias?.dataFim,
         transporte: viagem?.transporte || preferencias?.transporte,
@@ -1548,7 +1555,7 @@ function AssistantView({
         ...(hospedagemBase ? { hospedagemBase: `${hospedagemBase.nome} (${hospedagemBase.lat}, ${hospedagemBase.lng})` } : {}),
         roteiro: viagem?.roteiro.map((item) => `dia ${item.dia}: ${item.titulo}`).join(" | "),
       });
-      const destinoAtual = viagem?.destino || preferencias?.destino || "";
+      const destinoAtual = destinoInferido;
       const sugestaoRespostaBruta = resposta.orcamentoSugerido ?? (perguntaPedeOrcamento(pergunta) ? sugestaoOrcamento() : undefined);
       const sugestaoResposta = sugestaoRespostaBruta ? completarSugestaoOrcamento(sugestaoRespostaBruta) : undefined;
       const respostaComOrcamento: MensagemAssistente = {
@@ -1727,7 +1734,7 @@ function AssistantView({
     } catch {
       // O chat continua útil mesmo quando o provedor de IA falha, usando as
       // regras locais. Nenhuma consulta ao Google Places é feita neste fluxo.
-      const destinoBusca = viagem?.destino || preferencias?.destino || "";
+      const destinoBusca = viagem?.destino || preferencias?.destino || destinoInferidoDaPergunta(pergunta);
       const fallback = respostaLocalAssistente(pergunta, {
         modoOrcamento,
         limite,

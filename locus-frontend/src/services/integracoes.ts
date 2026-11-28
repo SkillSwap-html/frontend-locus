@@ -537,7 +537,20 @@ export async function perguntarGemini(
     const raw = await chamar(() =>
       api.post<Json>(`${BASE}/gemini/conteudo`, { prompt }, { timeout: 30000 }),
     );
-    const interpretada = interpretarAssistente(raw);
+    let interpretada = interpretarAssistente(raw);
+    const pedidoDeLocais = /roteiro|turíst|turist|praia|museu|parque|atraç|lugares?|passeio/i.test(textoPergunta);
+    if (pedidoDeLocais && contexto?.destino && !interpretada.recomendacoes?.length) {
+      try {
+        const reforco = `${prompt}\n\nATENÇÃO: a resposta anterior não trouxe cartões de locais. Retorne agora obrigatoriamente de 8 a 12 recomendações específicas e reais dentro de ${contexto.destino}, com título, endereço completo, categoria, resumo, custos estimados e, somente quando souber com segurança, avaliação e coordenadas. Inclua o ponto pedido pelo usuário e outros pontos turísticos da mesma cidade. Responda apenas com o JSON solicitado.`;
+        const segundaResposta = await chamar(() =>
+          api.post<Json>(`${BASE}/gemini/conteudo`, { prompt: reforco }, { timeout: 30000 }),
+        );
+        const interpretadaNovamente = interpretarAssistente(segundaResposta);
+        if (interpretadaNovamente.recomendacoes?.length) interpretada = interpretadaNovamente;
+      } catch {
+        // A busca do Places e o fallback local ainda podem preencher os cartões.
+      }
+    }
     if (interpretada.texto !== "Recebi uma resposta vazia. Tente reformular a pergunta." || interpretada.consultas?.length || interpretada.orcamentoSugerido) {
       return {
         id: uid(),
