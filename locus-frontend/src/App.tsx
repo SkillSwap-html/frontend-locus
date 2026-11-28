@@ -1563,10 +1563,7 @@ function AssistantView({
       const consultaPadrao = destinoBusca
         ? `${pergunta} em ${destinoBusca}`
         : pergunta;
-      // A consulta digitada pelo viajante vem primeiro. Isso garante que um
-      // lugar nomeado, como "Torre Eiffel", não seja perdido atrás de uma
-      // lista genérica de pontos turísticos de Paris.
-      const consultas = [...new Set([consultaPadrao, ...consultasDeCategorias, ...consultasDaIa])].slice(0, 8);
+      const consultas = [...new Set([...consultasDeCategorias, ...consultasDaIa, consultaPadrao])].slice(0, 8);
       const contextoProximidade = hospedagemBase
         ? ` próximo à hospedagem ${hospedagemBase.nome}`
         : "";
@@ -1590,20 +1587,6 @@ function AssistantView({
       let respostaFinal = respostaComOrcamento;
       if (encontrados.length) {
         const unicos = [...new globalThis.Map(encontrados.map((item) => [item.placeId, item])).values()];
-        const termosPedido = pergunta
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase()
-          .split(/[^a-z0-9]+/)
-          .filter((termo) => termo.length >= 4 && !["quero", "mostre", "mostrar", "ver", "veja", "local", "lugar", "paris"].includes(termo));
-        const pontuacao = (lugar: Lugar) => {
-          const textoLugar = `${lugar.nome} ${lugar.endereco}`
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .toLowerCase();
-          return termosPedido.reduce((total, termo) => total + (textoLugar.includes(termo) ? 1 : 0), 0);
-        };
-        unicos.sort((a, b) => pontuacao(b) - pontuacao(a));
         const pedidoHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/i.test(pergunta);
         const locaisRelevantes = pedidoHospedagem
           ? unicos
@@ -1735,7 +1718,7 @@ function AssistantView({
       try {
         const consultasFallback = consultasParaLocais(pergunta, destinoBusca);
         const resultado = await Promise.all(
-          [...new Set([destinoBusca ? `${pergunta} em ${destinoBusca}` : pergunta, ...consultasFallback])]
+          [...new Set([...consultasFallback, destinoBusca ? `${pergunta} em ${destinoBusca}` : pergunta])]
             .slice(0, 6)
             .map((consulta) => buscaTextual(consulta).catch(() => ({ lugares: [], fallback: false }))),
         ).then((resultados) => ({ lugares: resultados.flatMap((item) => item.lugares) }));
