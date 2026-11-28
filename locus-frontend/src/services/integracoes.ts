@@ -1,5 +1,5 @@
 import type { CategoriaOrcamento, Lugar, MensagemAssistente, OfertaHotel, OfertaVoo } from "@/types";
-import { api, chamar } from "./api";
+import { api, chamar, LocusError } from "./api";
 import { uid } from "./ids";
 
 /** O navegador chama apenas o backend; as chaves dos provedores nunca ficam aqui. */
@@ -357,6 +357,7 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
     const evidencia = objeto(value.evidencia);
     const categoria = texto(value.categoria) as NonNullable<MensagemAssistente["recomendacoes"]>[number]["categoria"];
     const natureza = texto(value.natureza) as NonNullable<MensagemAssistente["recomendacoes"]>[number]["natureza"];
+    const avaliacao = Number(value.avaliacao ?? value.rating ?? value.nota);
     return {
       id: texto(value.id) || `recomendacao-${Date.now()}-${index}`,
       tipo: (texto(value.tipo) || "lugar") as NonNullable<MensagemAssistente["recomendacoes"]>[number]["tipo"],
@@ -369,7 +370,7 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
       },
       ...(texto(value.consulta) ? { consulta: texto(value.consulta) } : {}),
       ...(texto(value.placeId) ? { placeId: texto(value.placeId) } : {}),
-      ...(Number.isFinite(Number(value.avaliacao ?? value.rating ?? value.nota)) ? { avaliacao: Number(value.avaliacao ?? value.rating ?? value.nota) } : {}),
+      ...(Number.isFinite(avaliacao) && avaliacao > 0 && avaliacao <= 5 ? { avaliacao } : {}),
       ...(texto(value.endereco) ? { endereco: texto(value.endereco) } : {}),
       ...(Number.isFinite(Number(value.lat)) ? { lat: Number(value.lat) } : {}),
       ...(Number.isFinite(Number(value.lng)) ? { lng: Number(value.lng) } : {}),
@@ -525,7 +526,7 @@ export async function perguntarGemini(
         contexto.orcamentoDetalhado ? `Resumo por categoria: ${contexto.orcamentoDetalhado}. Ajude a pessoa a definir e revisar os valores de passagem, hospedagem, visitas, alimentação, transporte local e extras.` : "",
       ].filter(Boolean).join(" ")
     : "";
-  const regras = "Não repita saudações nem perguntas já respondidas. Recomende somente locais dentro do destino obrigatório. Para cada praia, museu, parque, restaurante ou ponto turístico, use um local específico e real com nome oficial, nunca expressões genéricas como praia próxima ou museu local. Quando o destino tiver vários locais separados por ponto e vírgula, barra vertical, barra comum ou quebra de linha, cubra cada cidade, estado ou país separadamente. Se a pessoa informar apenas país ou estado e pedir locais próximos sem indicar cidade ou região, pergunte qual cidade ou região deve ser considerada antes de confirmar pontos próximos. Quando houver hospedagem-base, priorize locais em até 20 km dela e informe a distância calculada. Quando a pessoa perguntar sobre orçamento, mostre o total, o acumulado e uma sugestão separada por passagem, hospedagem, visitas, alimentação, transporte local e extras. Para cada ponto turístico recomendado, estime também alimentação, deslocamento local e extras, informe que são estimativas e, quando fizer sentido, indique a moeda local e o equivalente em reais. Nunca ultrapasse o limite fixo; em orçamento aberto, some cada escolha e explique o valor estimado que ainda falta para alimentação, transporte local e extras. Para cada local, traga nome oficial e endereço completo. Informe avaliação e coordenadas somente quando souber com segurança; não invente esses dados. O Maps e o Street View serão abertos no modal do Locus pelo endereço ou pelas coordenadas retornadas pela IA.";
+  const regras = "Não repita saudações nem perguntas já respondidas. Recomende somente locais dentro do destino obrigatório. Para cada praia, museu, parque, restaurante ou ponto turístico, use um local específico e real com nome oficial, nunca expressões genéricas como praia próxima ou museu local. Quando o destino tiver vários locais separados por ponto e vírgula, barra vertical, barra comum ou quebra de linha, cubra cada cidade, estado ou país separadamente. Se a pessoa informar apenas país ou estado e pedir locais próximos sem indicar cidade ou região, pergunte qual cidade ou região deve ser considerada antes de confirmar pontos próximos. Quando o pedido for por roteiro ou pontos turísticos, entregue de 8 a 12 recomendações específicas, distribuídas entre categorias e destinos; se houver um ponto específico pedido, mantenha-o e complemente com outros locais próximos. Quando houver hospedagem-base, priorize locais em até 20 km dela e informe a distância calculada. Quando a pessoa perguntar sobre orçamento, mostre o total, o acumulado e uma sugestão separada por passagem, hospedagem, visitas, alimentação, transporte local e extras. Para cada ponto turístico recomendado, estime também alimentação, deslocamento local e extras, informe que são estimativas e, quando fizer sentido, indique a moeda local e o equivalente em reais. Nunca ultrapasse o limite fixo; em orçamento aberto, some cada escolha e explique o valor estimado que ainda falta para alimentação, transporte local e extras. Para cada local, traga nome oficial e endereço completo. Informe avaliação e coordenadas somente quando souber com segurança; não invente esses dados. O Maps e o Street View serão abertos no modal do Locus pelo endereço ou pelas coordenadas retornadas pela IA.";
   const promptCompleto = [financeiro, viagem, regras, historicoTexto, `Usuário: ${textoPergunta}`]
     .filter(Boolean)
     .join("\n\n");
@@ -557,16 +558,72 @@ export interface ResultadoBusca {
   fallback: boolean;
 }
 
+const CACHE_PLACES_MS = 90_000;
+const INTERVALO_MINIMO_PLACES_MS = 650;
+const cacheBusca = new Map<string, { expiraEm: number; resultado: ResultadoBusca }>();
+let placesIndisponivelAte = 0;
+let filaConsultasPlaces: Promise<unknown> = Promise.resolve();
+let ultimaConsultaPlacesEm = 0;
+
+function chaveBusca(valor: string): string {
+  return valor.trim().toLocaleLowerCase();
+}
+
+function placesFoiLimitado(error: unknown): boolean {
+  return error instanceof LocusError && error.tipo === "quota";
+}
+
+async function executarConsultaPlaces<T>(consulta: () => Promise<T>): Promise<T> {
+  const tarefa = filaConsultasPlaces.then(async () => {
+    const espera = Math.max(0, INTERVALO_MINIMO_PLACES_MS - (Date.now() - ultimaConsultaPlacesEm));
+    if (espera > 0) await new Promise((resolve) => setTimeout(resolve, espera));
+    ultimaConsultaPlacesEm = Date.now();
+    return consulta();
+  });
+  filaConsultasPlaces = tarefa.then(() => undefined, () => undefined);
+  return tarefa;
+}
+
 export function parecePlaceIdGoogle(placeId: string | undefined): boolean {
   const valor = (placeId ?? "").replace(/^places\//, "").trim();
   return valor.length >= 20 && /^[A-Za-z0-9_-]+$/.test(valor);
 }
 
 export async function buscaTextual(q: string): Promise<ResultadoBusca> {
-  // O planejamento do chat não consulta mais o Places. A IA é a fonte das
-  // recomendações; Maps e Street View usam o endereço no modal.
-  void q;
-  return { lugares: [], fallback: true };
+  const chave = chaveBusca(q);
+  if (!chave) return { lugares: [], fallback: true };
+  const cacheado = cacheBusca.get(chave);
+  if (cacheado && cacheado.expiraEm > Date.now()) return cacheado.resultado;
+  if (placesIndisponivelAte > Date.now()) {
+    const resultado = { lugares: [], fallback: true };
+    cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
+    return resultado;
+  }
+  try {
+    const raw = await executarConsultaPlaces<Json>(() => {
+      if (placesIndisponivelAte > Date.now()) return Promise.resolve({ places: [] });
+      return chamar<Json>(() =>
+        api.post(`${BASE}/google/places/busca-textual`, {
+          textQuery: q,
+          languageCode: "pt-BR",
+        }),
+      );
+    });
+    const places = Array.isArray(raw.places) ? raw.places : [];
+    const resultado = places.length
+      ? { lugares: places.map(normalizarLugar), fallback: false }
+      : { lugares: [], fallback: true };
+    cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
+    return resultado;
+  } catch (error) {
+    if (placesFoiLimitado(error) || error instanceof LocusError) {
+      placesIndisponivelAte = Date.now() + CACHE_PLACES_MS;
+      const resultado = { lugares: [], fallback: true };
+      cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
+      return resultado;
+    }
+    throw error;
+  }
 }
 
 export async function autocomplete(q: string): Promise<{ id: string; texto: string }[]> {
@@ -576,7 +633,11 @@ export async function autocomplete(q: string): Promise<{ id: string; texto: stri
 
 export async function detalhesLugar(placeId: string): Promise<Lugar> {
   const id = placeId.replace(/^places\//, "");
-  return normalizarLugar(await chamar<Json>(() => api.get(`${BASE}/google/places/${encodeURIComponent(id)}`)));
+  return normalizarLugar(
+    await executarConsultaPlaces(() =>
+      chamar<Json>(() => api.get(`${BASE}/google/places/${encodeURIComponent(id)}`)),
+    ),
+  );
 }
 
 // ---------- Google Routes ----------
