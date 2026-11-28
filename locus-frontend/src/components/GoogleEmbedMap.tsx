@@ -12,9 +12,13 @@ export function GoogleEmbedMap({
   lng: number;
 }) {
   const chave = chaveGoogleMapsEmbed();
-  const consulta = [nome, endereco, `${lat},${lng}`].filter(Boolean).join(", ");
+  const consulta = [nome, endereco].filter(Boolean).join(", ");
   const src = chave
-    ? urlGoogleMapsEmbed("place", { q: consulta })
+    ? urlGoogleMapsEmbed("place", {
+        q: consulta,
+        center: `${lat},${lng}`,
+        zoom: "17",
+      })
     : "";
 
   return (

@@ -15,6 +15,7 @@ export function GoogleStreetView({
   const src = chave
     ? urlGoogleMapsEmbed("streetview", {
         location: `${lat},${lng}`,
+        radius: "1500",
         heading: "0",
         pitch: "0",
         fov: "90",

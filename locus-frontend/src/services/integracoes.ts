@@ -58,9 +58,38 @@ function normalizarLugar(raw: unknown): Lugar {
   return lugar;
 }
 
+function normalizarLugarCatalogo(raw: unknown): Lugar {
+  const value = objeto(raw);
+  return {
+    placeId: texto(value.placeId) || texto(value.id),
+    nome: texto(value.nome) || texto(value.name) || "Lugar sem nome",
+    endereco: texto(value.endereco) || texto(value.formattedAddress),
+    categoria: texto(value.categoria) || "Ponto de interesse",
+    tipos: Array.isArray(value.tipos) ? value.tipos.map(texto).filter(Boolean) : [],
+    ...(typeof value.avaliacao === "number" ? { avaliacao: value.avaliacao } : {}),
+    ...(typeof value.nivelPreco === "number" ? { nivelPreco: value.nivelPreco } : {}),
+    lat: numero(value.lat ?? objeto(value.location).latitude),
+    lng: numero(value.lng ?? objeto(value.location).longitude),
+    descricao: texto(value.descricao),
+    fonte: texto(value.fonte) || "Catálogo Locus",
+    consultadoEm: texto(value.consultadoEm) || new Date().toISOString(),
+    demonstrativo: value.demonstrativo === true,
+  };
+}
+
 type CoordenadaDestino = { lat: number; lng: number; nome: string };
 
 const DESTINOS_CONHECIDOS: Record<string, CoordenadaDestino> = {
+  paris: { lat: 48.8566, lng: 2.3522, nome: "Paris" },
+  "new york": { lat: 40.7128, lng: -74.0060, nome: "Nova York" },
+  nyc: { lat: 40.7128, lng: -74.0060, nome: "Nova York" },
+  "estados unidos": { lat: 39.8283, lng: -98.5795, nome: "Estados Unidos" },
+  usa: { lat: 39.8283, lng: -98.5795, nome: "Estados Unidos" },
+  miami: { lat: 25.7617, lng: -80.1918, nome: "Miami" },
+  orlando: { lat: 28.5383, lng: -81.3792, nome: "Orlando" },
+  washington: { lat: 38.9072, lng: -77.0369, nome: "Washington" },
+  "los angeles": { lat: 34.0522, lng: -118.2437, nome: "Los Angeles" },
+  "san francisco": { lat: 37.7749, lng: -122.4194, nome: "San Francisco" },
   curacao: { lat: 12.1696, lng: -68.9900, nome: "Curaçao" },
   cur: { lat: 12.1696, lng: -68.9900, nome: "Curaçao" },
   willemstad: { lat: 12.1090, lng: -68.9335, nome: "Willemstad" },
@@ -68,6 +97,8 @@ const DESTINOS_CONHECIDOS: Record<string, CoordenadaDestino> = {
   ssa: { lat: -12.9111, lng: -38.3313, nome: "Salvador" },
   lisboa: { lat: 38.7223, lng: -9.1393, nome: "Lisboa" },
   lis: { lat: 38.7742, lng: -9.1342, nome: "Lisboa" },
+  portugal: { lat: 39.3999, lng: -8.2245, nome: "Portugal" },
+  porto: { lat: 41.1579, lng: -8.6291, nome: "Porto" },
   madeira: { lat: 32.7607, lng: -16.9595, nome: "Ilha da Madeira" },
   funchal: { lat: 32.6669, lng: -16.9241, nome: "Funchal" },
   fnc: { lat: 32.6979, lng: -16.7745, nome: "Ilha da Madeira" },
@@ -84,10 +115,17 @@ const DESTINOS_CONHECIDOS: Record<string, CoordenadaDestino> = {
 };
 
 const SUGESTOES_LOCAIS = [
+  { id: "local-paris", texto: "Paris, França" },
+  { id: "local-new-york", texto: "Nova York, Estados Unidos" },
+  { id: "local-usa", texto: "Estados Unidos" },
+  { id: "local-miami", texto: "Miami, Flórida, Estados Unidos" },
+  { id: "local-orlando", texto: "Orlando, Flórida, Estados Unidos" },
+  { id: "local-washington", texto: "Washington, DC, Estados Unidos" },
   { id: "local-salvador", texto: "Salvador, Bahia, Brasil" },
   { id: "local-curacao", texto: "Curaçao, Caribe" },
   { id: "local-willemstad", texto: "Willemstad, Curaçao" },
   { id: "local-lisboa", texto: "Lisboa, Portugal" },
+  { id: "local-porto", texto: "Porto, Portugal" },
   { id: "local-madeira", texto: "Ilha da Madeira, Portugal" },
   { id: "local-rio", texto: "Rio de Janeiro, Brasil" },
   { id: "local-sao-paulo", texto: "São Paulo, Brasil" },
@@ -594,12 +632,45 @@ function placesFoiLimitado(error: unknown): boolean {
   return error instanceof LocusError && error.tipo === "quota";
 }
 
+async function buscarCatalogoLocais(q: string): Promise<Lugar[]> {
+  try {
+    const raw = await chamar<Json>(() =>
+      api.get(`${BASE}/catalogo-locais`, { params: { consulta: q } }),
+    );
+    const lugares = Array.isArray(raw.lugares) ? raw.lugares : [];
+    return lugares
+      .map(normalizarLugarCatalogo)
+      .filter((lugar) => Number.isFinite(lugar.lat) && Number.isFinite(lugar.lng) && !(lugar.lat === 0 && lugar.lng === 0));
+  } catch {
+    return [];
+  }
+}
+
+function mesclarLugares(principais: Lugar[], catalogo: Lugar[]): Lugar[] {
+  const resultado = [...principais];
+  const identidades = new Set(
+    principais.map((lugar) => normalizarBusca(`${lugar.nome} ${lugar.endereco}`)),
+  );
+  for (const lugar of catalogo) {
+    const identidade = normalizarBusca(`${lugar.nome} ${lugar.endereco}`);
+    const nome = normalizarBusca(lugar.nome);
+    const duplicado = identidades.has(identidade)
+      || resultado.some((item) => normalizarBusca(item.nome) === nome);
+    if (!duplicado) {
+      resultado.push(lugar);
+      identidades.add(identidade);
+    }
+  }
+  return resultado;
+}
+
 export async function buscaTextual(q: string): Promise<ResultadoBusca> {
   const chave = chaveBusca(q);
   const cacheado = cacheBusca.get(chave);
   if (cacheado && cacheado.expiraEm > Date.now()) return cacheado.resultado;
   if (placesIndisponivelAte > Date.now()) {
-    const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
+    const catalogo = await buscarCatalogoLocais(q);
+    const resultado = { lugares: catalogo.length ? catalogo : lugaresDemonstrativos(q), fallback: true };
     cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   }
@@ -608,15 +679,19 @@ export async function buscaTextual(q: string): Promise<ResultadoBusca> {
       api.post(`${BASE}/google/places/busca-textual`, { textQuery: q, languageCode: "pt-BR" }),
     );
     const places = Array.isArray(raw.places) ? raw.places : [];
-    const resultado = places.length
-      ? { lugares: places.map(normalizarLugar), fallback: false }
+    const lugaresGoogle = places.map(normalizarLugar);
+    const catalogo = await buscarCatalogoLocais(q);
+    const lugaresCompletos = mesclarLugares(lugaresGoogle, catalogo);
+    const resultado = lugaresCompletos.length
+      ? { lugares: lugaresCompletos, fallback: !lugaresGoogle.length }
       : { lugares: lugaresDemonstrativos(q), fallback: true };
     cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   } catch (error) {
     if (placesFoiLimitado(error) || error instanceof LocusError) {
       placesIndisponivelAte = Date.now() + CACHE_PLACES_MS;
-      const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
+      const catalogo = await buscarCatalogoLocais(q);
+      const resultado = { lugares: catalogo.length ? catalogo : lugaresDemonstrativos(q), fallback: true };
       cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
       return resultado;
     }
