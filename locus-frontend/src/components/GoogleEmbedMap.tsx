@@ -3,25 +3,18 @@ import { chaveGoogleMapsEmbed, urlGoogleMapsEmbed } from "@/services/googleMapsE
 export function GoogleEmbedMap({
   nome,
   endereco,
-  placeId,
   lat,
   lng,
 }: {
   nome: string;
   endereco?: string;
-  placeId?: string;
-  lat?: number;
-  lng?: number;
+  lat: number;
+  lng: number;
 }) {
   const chave = chaveGoogleMapsEmbed();
-  const coordenadas = Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0
-    ? `${lat},${lng}`
-    : "";
-  const consulta = [nome, endereco, coordenadas].filter(Boolean).join(", ");
-  const placeIdLimpo = placeId?.replace(/^places\//, "").trim();
-  const placeIdValido = Boolean(placeIdLimpo && placeIdLimpo.length >= 20 && /^[A-Za-z0-9_-]+$/.test(placeIdLimpo));
+  const consulta = [nome, endereco, `${lat},${lng}`].filter(Boolean).join(", ");
   const src = chave
-    ? urlGoogleMapsEmbed("place", { q: placeIdValido ? `place_id:${placeIdLimpo}` : consulta })
+    ? urlGoogleMapsEmbed("place", { q: consulta })
     : "";
 
   return (

@@ -8,10 +8,8 @@ const BASE = "/api/integracoes";
 type Json = any;
 
 const texto = (value: unknown) => (typeof value === "string" ? value : "");
-const numero = (value: unknown, fallback = 0) => {
-  const resultado = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(resultado) ? resultado : fallback;
-};
+const numero = (value: unknown, fallback = 0) =>
+  typeof value === "number" ? value : Number(value ?? fallback) || fallback;
 const objeto = (value: unknown): Json =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : {};
 
@@ -54,10 +52,8 @@ function normalizarLugar(raw: unknown): Lugar {
     consultadoEm: new Date().toISOString(),
     demonstrativo: false,
   };
-  const avaliacao = Number(value.rating);
-  const nivelPreco = Number(value.priceLevel);
-  if (Number.isFinite(avaliacao) && avaliacao > 0) lugar.avaliacao = avaliacao;
-  if (Number.isFinite(nivelPreco) && nivelPreco >= 0) lugar.nivelPreco = nivelPreco;
+  if (typeof value.rating === "number") lugar.avaliacao = value.rating;
+  if (typeof value.priceLevel === "number") lugar.nivelPreco = value.priceLevel;
   if (typeof opening.openNow === "boolean") lugar.aberto = opening.openNow;
   return lugar;
 }
@@ -127,6 +123,33 @@ function destinoParaExemplo(consulta: string): CoordenadaDestino {
     lng: 0,
     nome: trecho || "destino informado",
   };
+}
+
+function lugaresDemonstrativos(consulta: string): Lugar[] {
+  const destino = destinoParaExemplo(consulta);
+  const textoConsulta = normalizarBusca(consulta);
+  const querHospedagem = /hotel|hospedagem|pousada|hostel|resort|onde ficar/.test(textoConsulta);
+  const nomes = querHospedagem
+    ? ["Hospedagem central", "Pousada próxima à praia", "Hotel confortável no destino", "Hostel bem localizado"]
+    : ["Praia ou atração natural próxima", "Ponto turístico do centro", "Restaurante recomendado na região", "Museu ou atração cultural"];
+  const categorias = querHospedagem
+    ? ["Hotel", "Pousada", "Hotel", "Hostel"]
+    : ["Praia", "Ponto turístico", "Restaurante", "Museu"];
+  const possuiCoordenadas = destino.lat !== 0 || destino.lng !== 0;
+  const agora = new Date().toISOString();
+  return nomes.map((nome, index) => ({
+    placeId: `demo-${normalizarBusca(destino.nome).replace(/[^a-z0-9]+/g, "-")}-${index}`,
+    nome: `${nome} em ${destino.nome}`,
+    endereco: possuiCoordenadas
+      ? `${destino.nome} · localização de exemplo para planejamento`
+      : `${destino.nome} · confirme a localização no Google Maps`,
+    categoria: categorias[index]!,
+    lat: destino.lat + (index - 1.5) * 0.012,
+    lng: destino.lng + (index % 2 === 0 ? 1 : -1) * (0.014 + index * 0.003),
+    fonte: "Exemplo de planejamento · Google Places temporariamente limitado",
+    consultadoEm: agora,
+    demonstrativo: true,
+  }));
 }
 
 function sugestoesLocaisFallback(valor: string): { id: string; texto: string }[] {
@@ -357,7 +380,6 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
     const evidencia = objeto(value.evidencia);
     const categoria = texto(value.categoria) as NonNullable<MensagemAssistente["recomendacoes"]>[number]["categoria"];
     const natureza = texto(value.natureza) as NonNullable<MensagemAssistente["recomendacoes"]>[number]["natureza"];
-    const avaliacao = Number(value.avaliacao ?? value.rating ?? value.nota);
     return {
       id: texto(value.id) || `recomendacao-${Date.now()}-${index}`,
       tipo: (texto(value.tipo) || "lugar") as NonNullable<MensagemAssistente["recomendacoes"]>[number]["tipo"],
@@ -369,11 +391,8 @@ function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoe
         consultadoEm: texto(evidencia.consultadoEm) || new Date().toISOString(),
       },
       ...(texto(value.consulta) ? { consulta: texto(value.consulta) } : {}),
-      ...(texto(value.placeId) ? { placeId: texto(value.placeId) } : {}),
-      ...(Number.isFinite(avaliacao) && avaliacao > 0 && avaliacao <= 5 ? { avaliacao } : {}),
+      ...(Number.isFinite(Number(value.avaliacao ?? value.rating ?? value.nota)) ? { avaliacao: Number(value.avaliacao ?? value.rating ?? value.nota) } : {}),
       ...(texto(value.endereco) ? { endereco: texto(value.endereco) } : {}),
-      ...(Number.isFinite(Number(value.lat)) ? { lat: Number(value.lat) } : {}),
-      ...(Number.isFinite(Number(value.lng)) ? { lng: Number(value.lng) } : {}),
       ...(texto(value.categoriaLocal) ? { categoriaLocal: texto(value.categoriaLocal) } : {}),
       ...(Number.isInteger(Number(value.dia)) ? { dia: Number(value.dia) } : {}),
       ...(texto(value.horario) ? { horario: texto(value.horario) } : {}),
@@ -526,7 +545,7 @@ export async function perguntarGemini(
         contexto.orcamentoDetalhado ? `Resumo por categoria: ${contexto.orcamentoDetalhado}. Ajude a pessoa a definir e revisar os valores de passagem, hospedagem, visitas, alimentação, transporte local e extras.` : "",
       ].filter(Boolean).join(" ")
     : "";
-  const regras = "Não repita saudações nem perguntas já respondidas. Recomende somente locais dentro do destino obrigatório. Para cada praia, museu, parque, restaurante ou ponto turístico, use um local específico e real com nome oficial, nunca expressões genéricas como praia próxima ou museu local. Quando o destino tiver vários locais separados por ponto e vírgula, barra vertical, barra comum ou quebra de linha, cubra cada cidade, estado ou país separadamente. Se a pessoa informar apenas país ou estado e pedir locais próximos sem indicar cidade ou região, pergunte qual cidade ou região deve ser considerada antes de confirmar pontos próximos. Quando o pedido for por roteiro ou pontos turísticos, entregue de 8 a 12 recomendações específicas, distribuídas entre categorias e destinos; se houver um ponto específico pedido, mantenha-o e complemente com outros locais próximos. Quando houver hospedagem-base, priorize locais em até 20 km dela e informe a distância calculada. Quando a pessoa perguntar sobre orçamento, mostre o total, o acumulado e uma sugestão separada por passagem, hospedagem, visitas, alimentação, transporte local e extras. Para cada ponto turístico recomendado, estime também alimentação, deslocamento local e extras, informe que são estimativas e, quando fizer sentido, indique a moeda local e o equivalente em reais. Nunca ultrapasse o limite fixo; em orçamento aberto, some cada escolha e explique o valor estimado que ainda falta para alimentação, transporte local e extras. Para cada local, traga nome oficial e endereço completo. Informe avaliação e coordenadas somente quando souber com segurança; não invente esses dados. O Maps e o Street View serão abertos no modal do Locus pelo endereço ou pelas coordenadas retornadas pela IA.";
+  const regras = "Não repita saudações nem perguntas já respondidas. Recomende somente locais dentro do destino obrigatório; para locais nomeados, gere consultas ao Google Places e deixe a confirmação dos dados para a busca real. Quando o destino tiver vários locais separados por ponto e vírgula ou barra vertical, cubra cada cidade, estado ou país separadamente. Se a pessoa informar apenas país ou estado e pedir locais próximos sem indicar cidade ou região, pergunte qual cidade ou região deve ser considerada antes de confirmar pontos próximos. Quando houver hospedagem-base, priorize locais em até 20 km dela e informe que o sistema vai conferir a distância e a rota. Quando a pessoa perguntar sobre orçamento, mostre o total, o acumulado e uma sugestão separada por passagem, hospedagem, visitas, alimentação, transporte local e extras. Para cada ponto turístico recomendado, estime também alimentação, deslocamento local e extras, informe que são estimativas e, quando fizer sentido, indique a moeda local e o equivalente em reais. Nunca ultrapasse o limite fixo; em orçamento aberto, some cada escolha e explique o valor estimado que ainda falta para alimentação, transporte local e extras.";
   const promptCompleto = [financeiro, viagem, regras, historicoTexto, `Usuário: ${textoPergunta}`]
     .filter(Boolean)
     .join("\n\n");
@@ -537,20 +556,7 @@ export async function perguntarGemini(
     const raw = await chamar(() =>
       api.post<Json>(`${BASE}/gemini/conteudo`, { prompt }, { timeout: 30000 }),
     );
-    let interpretada = interpretarAssistente(raw);
-    const pedidoDeLocais = /roteiro|turíst|turist|praia|museu|parque|atraç|lugares?|passeio/i.test(textoPergunta);
-    if (pedidoDeLocais && contexto?.destino && !interpretada.recomendacoes?.length) {
-      try {
-        const reforco = `${prompt}\n\nATENÇÃO: a resposta anterior não trouxe cartões de locais. Retorne agora obrigatoriamente de 8 a 12 recomendações específicas e reais dentro de ${contexto.destino}, com título, endereço completo, categoria, resumo, custos estimados e, somente quando souber com segurança, avaliação e coordenadas. Inclua o ponto pedido pelo usuário e outros pontos turísticos da mesma cidade. Responda apenas com o JSON solicitado.`;
-        const segundaResposta = await chamar(() =>
-          api.post<Json>(`${BASE}/gemini/conteudo`, { prompt: reforco }, { timeout: 30000 }),
-        );
-        const interpretadaNovamente = interpretarAssistente(segundaResposta);
-        if (interpretadaNovamente.recomendacoes?.length) interpretada = interpretadaNovamente;
-      } catch {
-        // A busca do Places e o fallback local ainda podem preencher os cartões.
-      }
-    }
+    const interpretada = interpretarAssistente(raw);
     if (interpretada.texto !== "Recebi uma resposta vazia. Tente reformular a pergunta." || interpretada.consultas?.length || interpretada.orcamentoSugerido) {
       return {
         id: uid(),
@@ -571,12 +577,14 @@ export interface ResultadoBusca {
   fallback: boolean;
 }
 
-const CACHE_PLACES_MS = 90_000;
-const INTERVALO_MINIMO_PLACES_MS = 650;
+// O Places tem limite de taxa. Uma busca feita pelo chat, pela lateral e pelo
+// autocomplete não deve disparar três chamadas idênticas a cada renderização.
+// O cache curto também permite que o chat continue funcionando com fallback
+// local enquanto a cota do Google é recomposta.
+const CACHE_PLACES_MS = 45_000;
 const cacheBusca = new Map<string, { expiraEm: number; resultado: ResultadoBusca }>();
+const cacheAutocomplete = new Map<string, { expiraEm: number; resultado: { id: string; texto: string }[] }>();
 let placesIndisponivelAte = 0;
-let filaConsultasPlaces: Promise<unknown> = Promise.resolve();
-let ultimaConsultaPlacesEm = 0;
 
 function chaveBusca(valor: string): string {
   return valor.trim().toLocaleLowerCase();
@@ -586,52 +594,29 @@ function placesFoiLimitado(error: unknown): boolean {
   return error instanceof LocusError && error.tipo === "quota";
 }
 
-async function executarConsultaPlaces<T>(consulta: () => Promise<T>): Promise<T> {
-  const tarefa = filaConsultasPlaces.then(async () => {
-    const espera = Math.max(0, INTERVALO_MINIMO_PLACES_MS - (Date.now() - ultimaConsultaPlacesEm));
-    if (espera > 0) await new Promise((resolve) => setTimeout(resolve, espera));
-    ultimaConsultaPlacesEm = Date.now();
-    return consulta();
-  });
-  filaConsultasPlaces = tarefa.then(() => undefined, () => undefined);
-  return tarefa;
-}
-
-export function parecePlaceIdGoogle(placeId: string | undefined): boolean {
-  const valor = (placeId ?? "").replace(/^places\//, "").trim();
-  return valor.length >= 20 && /^[A-Za-z0-9_-]+$/.test(valor);
-}
-
 export async function buscaTextual(q: string): Promise<ResultadoBusca> {
   const chave = chaveBusca(q);
-  if (!chave) return { lugares: [], fallback: true };
   const cacheado = cacheBusca.get(chave);
   if (cacheado && cacheado.expiraEm > Date.now()) return cacheado.resultado;
   if (placesIndisponivelAte > Date.now()) {
-    const resultado = { lugares: [], fallback: true };
+    const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
     cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   }
   try {
-    const raw = await executarConsultaPlaces<Json>(() => {
-      if (placesIndisponivelAte > Date.now()) return Promise.resolve({ places: [] });
-      return chamar<Json>(() =>
-        api.post(`${BASE}/google/places/busca-textual`, {
-          textQuery: q,
-          languageCode: "pt-BR",
-        }),
-      );
-    });
+    const raw = await chamar<Json>(() =>
+      api.post(`${BASE}/google/places/busca-textual`, { textQuery: q, languageCode: "pt-BR" }),
+    );
     const places = Array.isArray(raw.places) ? raw.places : [];
     const resultado = places.length
       ? { lugares: places.map(normalizarLugar), fallback: false }
-      : { lugares: [], fallback: true };
+      : { lugares: lugaresDemonstrativos(q), fallback: true };
     cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
     return resultado;
   } catch (error) {
     if (placesFoiLimitado(error) || error instanceof LocusError) {
       placesIndisponivelAte = Date.now() + CACHE_PLACES_MS;
-      const resultado = { lugares: [], fallback: true };
+      const resultado = { lugares: lugaresDemonstrativos(q), fallback: true };
       cacheBusca.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
       return resultado;
     }
@@ -641,15 +626,46 @@ export async function buscaTextual(q: string): Promise<ResultadoBusca> {
 
 export async function autocomplete(q: string): Promise<{ id: string; texto: string }[]> {
   if (q.length < 2) return [];
-  return sugestoesLocaisFallback(q);
+  const chave = chaveBusca(q);
+  const cacheado = cacheAutocomplete.get(chave);
+  if (cacheado && cacheado.expiraEm > Date.now()) return cacheado.resultado;
+  if (placesIndisponivelAte > Date.now()) {
+    const resultado = sugestoesLocaisFallback(q);
+    cacheAutocomplete.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
+    return resultado;
+  }
+  try {
+    const raw = await chamar<Json>(() =>
+      api.post(`${BASE}/google/places/autocomplete`, { input: q }),
+    );
+    const suggestions = Array.isArray(raw.suggestions) ? raw.suggestions : [];
+    const resultadoGoogle = suggestions
+    .map((item: Json) => {
+      const prediction = objeto(objeto(item).placePrediction);
+      const description = objeto(prediction.text);
+      return {
+        id: texto(prediction.placeId),
+        texto: texto(description.text) || texto(prediction.placeId),
+      };
+    })
+    .filter((item: { id: string; texto: string }) => item.id || item.texto);
+    const resultado = resultadoGoogle.length ? resultadoGoogle : sugestoesLocaisFallback(q);
+    cacheAutocomplete.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
+    return resultado;
+  } catch (error) {
+    if (placesFoiLimitado(error) || error instanceof LocusError) {
+      placesIndisponivelAte = Date.now() + CACHE_PLACES_MS;
+      const resultado = sugestoesLocaisFallback(q);
+      cacheAutocomplete.set(chave, { expiraEm: Date.now() + CACHE_PLACES_MS, resultado });
+      return resultado;
+    }
+    throw error;
+  }
 }
 
 export async function detalhesLugar(placeId: string): Promise<Lugar> {
-  const id = placeId.replace(/^places\//, "");
   return normalizarLugar(
-    await executarConsultaPlaces(() =>
-      chamar<Json>(() => api.get(`${BASE}/google/places/${encodeURIComponent(id)}`)),
-    ),
+    await chamar<Json>(() => api.get(`${BASE}/google/places/${encodeURIComponent(placeId)}`)),
   );
 }
 
@@ -789,7 +805,70 @@ export async function precificarVoo(oferta: OfertaVoo | Json): Promise<Json> {
 export async function buscarHoteis(
   params: Record<string, string | number>,
 ): Promise<OfertaHotel[]> {
-  // Sem Places: até existir um provedor de hospedagem próprio, o fluxo usa
-  // ofertas simuladas claramente identificadas e não dispara chamadas 429.
-  return hospedagensExemplo(params);
+  const cidade = texto(params["cityName"]) || texto(params["cityCode"]);
+  const entrada = texto(params["checkInDate"]);
+  const saida = texto(params["checkOutDate"]);
+  const adultos = Math.max(1, numero(params["adults"], 1));
+  const quartos = Math.max(1, numero(params["roomQuantity"], 1));
+  const noites = entrada && saida
+    ? Math.max(1, Math.floor((new Date(`${saida}T12:00:00`).getTime() - new Date(`${entrada}T12:00:00`).getTime()) / 86400000))
+    : 0;
+  try {
+    const raw = await chamar<Json>(() =>
+      api.post(`${BASE}/google/places/busca-textual`, {
+        textQuery: `hotéis e hospedagens reais em ${cidade}`,
+        languageCode: "pt-BR",
+      }),
+    );
+    const places = Array.isArray(raw.places) ? raw.places : [];
+    if (!places.length) return hospedagensExemplo(params);
+    return Promise.all(places.slice(0, 8).map(async (place: Json, index: number) => {
+    const value = objeto(place);
+    const displayName = objeto(value.displayName);
+    const location = objeto(value.location);
+    const photos = Array.isArray(value.photos) ? value.photos : [];
+    const photoName = texto(objeto(photos[0]).name);
+    let imagemUrl: string | undefined;
+    if (photoName) {
+      try {
+        const imagem = await api.get<Blob>(`${BASE}/google/places/photo`, {
+          params: { name: photoName, maxWidthPx: 900 },
+          responseType: "blob",
+        });
+        imagemUrl = URL.createObjectURL(imagem.data);
+      } catch {
+        // A foto é opcional; o hotel real continua aparecendo com nome e endereço.
+      }
+    }
+    return {
+      id: texto(value.id) || `hotel-${index}`,
+      hotel: texto(displayName.text) || "Hospedagem encontrada no Google",
+      quarto: `${adultos} hóspede(s) · ${quartos} quarto(s)`,
+      hospedes: adultos,
+      quartos,
+      ...(noites > 0 ? { noites } : {}),
+      checkin: entrada,
+      checkout: saida,
+      regime: "Consultar oferta",
+      politica: "Consultar oferta",
+      moeda: "BRL",
+      taxas: 0,
+      // O Places confirma o estabelecimento, mas não fornece tarifa para as datas.
+      // Não inventamos preço: a tela mostra “Consultar”.
+      preco: 0,
+      ...(imagemUrl ? { imagemUrl } : {}),
+      latitude: numero(location.latitude),
+      longitude: numero(location.longitude),
+      endereco: texto(value.formattedAddress) || texto(value.shortFormattedAddress),
+      fonte: "Google Places",
+      consultadoEm: new Date().toISOString(),
+      historico: [],
+    } satisfies OfertaHotel;
+    }));
+  } catch {
+    // A consulta de tarifas não pode impedir o usuário de continuar o
+    // planejamento. Os exemplos abaixo são claramente identificados e
+    // calculados para o destino, datas, hóspedes e quartos informados.
+    return hospedagensExemplo(params);
+  }
 }
